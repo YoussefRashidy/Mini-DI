@@ -6,7 +6,7 @@ package io.github.youssefrashidy.Context;
 public class EagerInitializationTest {
 
     public static void main(String[] args) {
-        ApplicationContextRef context = new ApplicationContextRef(EagerInitializationTest.class);
+        ApplicationContext context = new ApplicationContext(EagerInitializationTest.class);
 
         if (GreetingServiceImpl.constructorCalls() != 1) {
             throw new AssertionError("Expected eager initialization to construct GreetingServiceImpl once, but got "

@@ -5,21 +5,29 @@ import io.github.classgraph.ClassInfo;
 import io.github.classgraph.ScanResult;
 import io.github.youssefrashidy.Exceptions.AmbiguousBeanException;
 import io.github.youssefrashidy.Exceptions.AmbiguousConstructorException;
+import io.github.youssefrashidy.Exceptions.CircularDependencyException;
+import io.github.youssefrashidy.Exceptions.DuplicateBeanIdentifierException;
 import io.github.youssefrashidy.Exceptions.UnregisteredDependencyException;
 import io.github.youssefrashidy.annotations.Component;
 import io.github.youssefrashidy.annotations.Inject;
-import io.github.youssefrashidy.annotations.Singelton;
+import io.github.youssefrashidy.annotations.Qualifier;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Parameter;
 import java.util.*;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 public class ApplicationContext {
-    private final Map<Class<?>, Object> beanRegistry = new HashMap<>();
-    private final Map<Class<?>, List<Class<?>>> resolveMap = new HashMap<>();
-    private final ContextConfig config;
+    //    private final Map<BeanDefinition, Supplier<?>> beanRegistry = new HashMap<>();
+    private final Map<String, Supplier<?>> beanRegistry = new HashMap<>();   // source of truth
+    private final Map<String, BeanDefinition> definitions = new HashMap<>();  // metadata
+    private final Map<Class<?>, List<String>> typeIndex = new HashMap<>();    // type -> identifiers
 
+    private final Map<Class<?>, List<Class<?>>> resolveMap = new HashMap<>();
+    private final List<Class<?>> componentList = new ArrayList<>();
+    private final ContextConfig config;
 
     private static final Set<Class<?>> UNRESOLVABLE = Set.of(
             byte.class, short.class, int.class, long.class,
@@ -31,18 +39,131 @@ public class ApplicationContext {
 
     public ApplicationContext(Set<String> paths) {
         this.config = new ContextConfig(paths);
-        System.out.println("[ApplicationContext] created with base packages: " + config.basePackages());
         initializeContext();
     }
 
     public ApplicationContext(Class<?> entryPoint) {
         this.config = new ContextConfig(Set.of(entryPoint.getPackageName()));
-        System.out.println("[ApplicationContext] created from entry point: " + entryPoint.getName());
         initializeContext();
     }
 
+
+    private void initializeContext() {
+        resolvePackages();
+        Map<Class<?>, Set<Class<?>>> classGraph = new HashMap<>();
+        Map<Class<?>, Integer> indegreeMap = new HashMap<>();
+        buildMaps(classGraph, indegreeMap);
+        var initOrder = topologicalSort(classGraph, indegreeMap);
+        instantiateBeans(initOrder);
+
+    }
+
+    public <T> T getInstance(Class<T> cls) {
+        List<String> identifiers = typeIndex.getOrDefault(cls, Collections.emptyList());
+        if (identifiers.isEmpty()) {
+            throw new UnregisteredDependencyException(
+                    "DI error: no bean registered for requested type '" + cls.getName() + "'."
+            );
+        }
+
+        if (identifiers.size() > 1) {
+            String candidates = identifiers.stream()
+                    .map(id -> definitions.get(id).cls().getName() + " as '" + id + "'")
+                    .sorted()
+                    .collect(Collectors.joining(", "));
+            throw new AmbiguousBeanException(
+                    "DI error: multiple beans registered for requested type '" + cls.getName() + "': [" + candidates +
+                            "]. Use getInstance(String, Class) with a qualifier identifier."
+            );
+        }
+
+        return getInstance(identifiers.getFirst(), cls);
+    }
+
+    public Object getInstance(String identifier) {
+        Supplier<?> supplier = beanRegistry.get(identifier);
+        if (supplier == null) {
+            throw new UnregisteredDependencyException(
+                    "DI error: no bean registered with identifier '" + identifier + "'."
+            );
+        }
+        return supplier.get();
+    }
+
+    public <T> T getInstance(String identifier, Class<T> expectedType) {
+        Object bean = getInstance(identifier);
+        if (!expectedType.isInstance(bean)) {
+            throw new UnregisteredDependencyException(
+                    "DI error: bean identifier '" + identifier + "' resolves to type '" + bean.getClass().getName() +
+                            "', not assignable to requested type '" + expectedType.getName() + "'."
+            );
+        }
+        return expectedType.cast(bean);
+    }
+
+    public Set<String> getBeanIdentifiers() {
+        return Collections.unmodifiableSet(definitions.keySet());
+    }
+
+    private void instantiateBeans(List<Class<?>> initOrder) {
+        for (var cls : initOrder) {
+            Constructor<?>[] constructors = cls.getDeclaredConstructors();
+            // check default Constructor
+            if (constructors.length == 1 && constructors[0].getParameterCount() == 0) {
+                String identifier = resolveIdentifier(cls);
+                Constructor<?> cons = constructors[0];
+                cons.setAccessible(true);
+                try {
+                    var instance = cons.newInstance(new Object[0]);
+                    Supplier<?> supplier = () -> instance;
+                    registerBean(cls, identifier, supplier);
+
+                } catch (InvocationTargetException | IllegalAccessException | InstantiationException e) {
+                    throw new RuntimeException(e);
+                }
+            } else {
+                // This is valid because of the way the graph is built
+                var annotatedConstructor = Arrays.stream(constructors)
+                        .filter(c -> c.isAnnotationPresent(Inject.class))
+                        .toArray(Constructor<?>[]::new)[0];
+                annotatedConstructor.setAccessible(true);
+
+                Parameter[] params = annotatedConstructor.getParameters();
+                ArrayList<Object> beans = new ArrayList<>(params.length);
+
+                for (var param : params) {
+                    if (param.getType().isInterface()) {
+                        // if annotated get by annotation
+                        String identifier;
+                        if (param.isAnnotationPresent(Qualifier.class)) {
+                            identifier = param.getAnnotation(Qualifier.class).value();
+                            var paramInstance = beanRegistry.get(identifier).get();
+                            beans.add(paramInstance);
+                        } else {
+                            var paramCls = resolveMap.get(param.getType()).getFirst();
+                            identifier = resolveIdentifier(paramCls);
+                            Object paramInstance = beanRegistry.get(identifier).get();
+                            beans.add(paramInstance);
+                        }
+                    } else {
+                        String identifier = resolveIdentifier(param.getType());
+                        beans.add(beanRegistry.get(identifier).get());
+                    }
+                }
+                try {
+                    Object instance = annotatedConstructor.newInstance(beans.toArray());
+                    String identifier = resolveIdentifier(cls);
+                    Supplier<?> supplier = () -> instance;
+                    registerBean(cls, identifier, supplier);
+                } catch (InvocationTargetException | InstantiationException | IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+
+            }
+        }
+    }
+
     private void resolvePackages() {
-        System.out.println("[ApplicationContext] resolvePackages() started for: " + config.basePackages());
         try (ScanResult scanResult = new ClassGraph()
                 .enableClassInfo()
                 .enableAllInfo()
@@ -50,238 +171,170 @@ public class ApplicationContext {
                 .scan()) {
             for (ClassInfo classInfo : scanResult.getAllClasses()) {
                 Class<?> cls = classInfo.loadClass();
-                System.out.println("[ApplicationContext] scanned class: " + cls.getName());
                 if (cls.isAnnotationPresent(Component.class)) {
-                    System.out.println("[ApplicationContext] component found: " + cls.getName());
+                    componentList.add(cls);
                     for (Class<?> abstraction : cls.getInterfaces())
                         resolveMap.computeIfAbsent(abstraction, _ -> new ArrayList<>())
                                 .add(cls);
                 }
             }
         }
-        System.out.println("[ApplicationContext] resolvePackages() finished. mappings=" + resolveMap.keySet());
     }
 
-    private void initializeContext() {
-        System.out.println("[ApplicationContext] initializeContext() start");
-        resolvePackages();
-        for (var entry : resolveMap.entrySet()) {
-            Class<?> cls = entry.getKey();
-            System.out.println("[ApplicationContext] eager initialize interface key: " + cls.getName());
-            initializeBean(cls);
-        }
-        System.out.println("[ApplicationContext] initializeContext() end");
-    }
-
-    private <T> void initializeBean(Class<T> cls) {
-        System.out.println("[ApplicationContext] initializeBean(" + cls.getName() + ")");
-        if (cls.isInterface()) {
-            var classes = resolveMap.get(cls);
-            System.out.println("[ApplicationContext] resolving interface bean: " + cls.getName() + " -> " + classes);
-            //TODO add exception message
-            //TODO implement qualifiers
-            if (classes.size() > 1) {
-                String candidates = classes.stream().map(Class::getName).sorted().reduce((a, b) -> a + ", " + b).orElse("<none>");
-                throw new AmbiguousBeanException(
-                        "Multiple beans found for interface '" + cls.getName() + "': [" + candidates + "]. " +
-                                "Use @Qualifier to choose a specific implementation."
-                );
-            }
-            else {
-                Class<?> beanCls = classes.getFirst();
-                System.out.println("[ApplicationContext] interface resolved to: " + beanCls.getName());
-                initializeBean(beanCls);
-            }
-        } else {
-            if (beanRegistry.containsKey(cls)) {
-                System.out.println("[ApplicationContext] cache hit: " + cls.getName());
-                return;
-            }
+    private void buildMaps(Map<Class<?>, Set<Class<?>>> classGraph, Map<Class<?>, Integer> indegreeMap) {
+        for (var cls : componentList) {
+            /*
+             * Get constructor
+             * Build adjacency list
+             * Build inDegree map
+             */
             Constructor<?>[] constructors = cls.getDeclaredConstructors();
-            System.out.println("[ApplicationContext] constructors found for " + cls.getName() + ": " + constructors.length);
-            // default constructor no need for inject acting as a base case
+            // check default Constructor
             if (constructors.length == 1 && constructors[0].getParameterCount() == 0) {
-                Constructor<?> constructor = constructors[0];
-                constructor.setAccessible(true); // To bypass access modifiers
-                if (beanRegistry.containsKey(cls)) {
-                    System.out.println("[ApplicationContext] cache hit after accessibility set: " + cls.getName());
-                    return;
-                } else {
-                    try {
-                        System.out.println("[ApplicationContext] invoking default constructor: " + cls.getName());
-                        T obj = (T) constructor.newInstance();
-                        beanRegistry.put(cls, obj);
-                        System.out.println("[ApplicationContext] bean created: " + cls.getName());
-                        return;
-                    } catch (InvocationTargetException | IllegalAccessException | InstantiationException e) {
-                        System.out.println("[ApplicationContext] default constructor failed for " + cls.getName() + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                        throw new RuntimeException(e);
-                    }
-                }
+                classGraph.put(cls, Collections.emptySet());
+                indegreeMap.put(cls, 0);
+                continue;
             }
-            Constructor<?>[] annotatedCons = Arrays.stream(constructors)
+            // get annotated Constructor
+            var annotatedConstructors = Arrays.stream(constructors)
                     .filter(c -> c.isAnnotationPresent(Inject.class))
-                    .toArray(Constructor[]::new);
-            System.out.println("[ApplicationContext] @Inject constructors for " + cls.getName() + ": " + annotatedCons.length);
-            if (annotatedCons.length > 1)
-                throw new AmbiguousConstructorException("Class " + cls.getName() + " has " + annotatedCons.length + " constructors — exactly one is required. " +
+                    .toArray(Constructor<?>[]::new);
+            if (annotatedConstructors.length > 1)
+                throw new AmbiguousConstructorException("Class " + cls.getName() + " has " + annotatedConstructors.length + " constructors — exactly one is required. " +
                         "Annotate the intended constructor with @Inject.");
-            Constructor<?> constructor = annotatedCons[0];
-            Parameter[] parameters = constructor.getParameters();
-            System.out.println("[ApplicationContext] resolving " + parameters.length + " parameters for " + cls.getName());
-            for (var param : parameters) {
-                System.out.println("[ApplicationContext] checking parameter: " + param.getName() + " : " + param.getType().getName());
+
+            var constructor = annotatedConstructors[0];
+            Parameter[] params = constructor.getParameters();
+
+            for (var param : params) {
                 if (UNRESOLVABLE.contains(param.getType()))
                     throw new UnregisteredDependencyException(
-                            "Parameter '" + param.getName() + "' of type " + param.getType().getName() +
-                                    " in " + cls.getName() + " is a primitive/value type and cannot be injected. " +
-                                    "Use a dedicated configuration object instead."
+                            "DI error: cannot inject parameter '" + param.getName() + "' of type '" + param.getType().getName() +
+                                    "' in bean '" + cls.getName() + "' because primitive/value types are not supported. " +
+                                    "Use a dedicated configuration bean instead."
                     );
 
                 if (!param.getType().isAnnotationPresent(Component.class) && !resolveMap.containsKey(param.getType()))
-                    throw new UnregisteredDependencyException("Field '" + param.getName() + "' of type " + param.getType().getName() +
-                            " in " + cls.getName() + " is not registered as a bean.");
-            }
+                    throw new UnregisteredDependencyException(
+                            "DI error: missing bean for parameter '" + param.getName() + "' of type '" + param.getType().getName() +
+                                    "' required by bean '" + cls.getName() + "'."
+                    );
+                // handle interfaces
+                var candidateClass = param.getType().isInterface() ? resolveParamType(param) : param.getType();
+                classGraph.computeIfAbsent(cls, _ -> new HashSet<Class<?>>()).add(candidateClass);
 
-            Class<?>[] paramClasses = Arrays.stream(parameters)
-                    .map(Parameter::getType)
-                    .toArray(Class<?>[]::new);
-            ArrayList<Object> beans = new ArrayList<>(paramClasses.length);
-            for (var paramClass : paramClasses) {
-                Class<?> resolvedClass;
-                if (paramClass.isInterface()) {
-                    var implementations = resolveMap.get(paramClass);
-                    System.out.println("[ApplicationContext] interface dependency " + paramClass.getName() + " implementations: " + implementations);
-                    if (implementations.size() > 1) {
-                        String candidates = implementations.stream().map(Class::getName).sorted().reduce((a, b) -> a + ", " + b).orElse("<none>");
-                        throw new AmbiguousBeanException(
-                                "Cannot resolve dependency interface '" + paramClass.getName() + "' while creating '" + cls.getName() +
-                                        "': multiple candidates found [" + candidates + "]. Use @Qualifier to disambiguate."
-                        );
-                    } else if (implementations.isEmpty()) {
-                        throw new UnregisteredDependencyException(
-                                "Cannot resolve dependency interface '" + paramClass.getName() + "' while creating '" + cls.getName() +
-                                        "': no implementation was registered as a bean."
-                        );
-                    }
-                    resolvedClass = implementations.getFirst();
-                } else resolvedClass = paramClass;
-                if (beanRegistry.containsKey(resolvedClass)) {
-                    System.out.println("[ApplicationContext] dependency cache hit: " + resolvedClass.getName());
-                    beans.add(beanRegistry.get(resolvedClass));
-                } else {
-                    System.out.println("[ApplicationContext] dependency miss, initializing: " + resolvedClass.getName());
-                    initializeBean(resolvedClass);
-                    var bean = beanRegistry.get(resolvedClass);
-                    beans.add(bean);
-                }
             }
-            try {
-                constructor.setAccessible(true);
-                System.out.println("[ApplicationContext] invoking injected constructor: " + cls.getName());
-                T obj = (T) constructor.newInstance(beans.toArray());
-                beanRegistry.put(cls, obj);
-                System.out.println("[ApplicationContext] bean created: " + cls.getName());
-            } catch (RuntimeException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
-                System.out.println("[ApplicationContext] injected constructor failed for " + cls.getName() + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                throw new RuntimeException(e);
-            }
+            indegreeMap.put(cls, classGraph.get(cls).size());
         }
     }
 
-    public <T> T getInstance(Class<T> cls) {
-        System.out.println("[ApplicationContext] getInstance(" + cls.getName() + ")");
-        if (beanRegistry.containsKey(cls)) {
-            System.out.println("[ApplicationContext] getInstance cache hit: " + cls.getName());
-            return (T) beanRegistry.get(cls);
-        } else if (resolveMap.containsKey(cls)) {
-            System.out.println("[ApplicationContext] getInstance found interface mapping: " + cls.getName());
-            // get the concrete class and return if exist
-            Class<?> resolvedClass;
-            var implementations = resolveMap.get(cls);
-            System.out.println("[ApplicationContext] interface dependency " + cls.getName() + " implementations: " + implementations);
-            if (implementations.size() > 1) {
-                String candidates = implementations.stream().map(Class::getName).sorted().reduce((a, b) -> a + ", " + b).orElse("<none>");
+    private Class<?> resolveParamType(Parameter param) {
+        var classes = resolveMap.get(param.getType());
+
+        if (classes.size() > 1) {
+            // Look for qualifier over the field
+            if (param.isAnnotationPresent(Qualifier.class)) {
+                String val = param.getAnnotation(Qualifier.class).value();
+                var candidates = resolveMap.get(param.getType()).stream()
+                        .filter(cls -> cls.isAnnotationPresent(Qualifier.class) && cls.getAnnotation(Qualifier.class).value().equals(val))
+                        .toList();
+                if (candidates.size() > 1)
+                    throw new AmbiguousBeanException(
+                            "DI error: multiple beans match qualifier '" + val + "' for interface '" + param.getType().getName() +
+                                    "' on parameter '" + param.getName() + "': [" +
+                                    candidates.stream().map(Class::getName).sorted().collect(Collectors.joining(", ")) + "]."
+                    );
+                if (candidates.isEmpty())
+                    throw new AmbiguousBeanException(
+                            "DI error: no bean matches qualifier '" + val + "' for interface '" + param.getType().getName() +
+                                    "' on parameter '" + param.getName() + "'."
+                    );
+
+                return candidates.getFirst();
+            }
+            else {
+                String candidates = classes.stream().map(Class::getName).sorted().collect(Collectors.joining(", "));
                 throw new AmbiguousBeanException(
-                        "Cannot resolve requested type '" + cls.getName() + "': multiple implementations found [" + candidates + "]. " +
-                                "Use @Qualifier to pick one implementation."
-                );
-            } else if (implementations.isEmpty()) {
-                throw new UnregisteredDependencyException(
-                        "Cannot resolve requested type '" + cls.getName() + "': no implementation was registered as a bean."
+                        "DI error: multiple beans found for interface '" + param.getType().getName() + "' on parameter '" +
+                                param.getName() + "': [" + candidates + "]. Add @Qualifier to disambiguate."
                 );
             }
-            resolvedClass = implementations.getFirst();
-            return (T) beanRegistry.get(resolvedClass);
+        }
+        else if (classes.size() == 1)
+            return classes.getFirst();
+        else
+            throw new UnregisteredDependencyException(
+                    "DI error: no bean implementation registered for interface '" + param.getType().getName() +
+                            "' required by parameter '" + param.getName() + "'."
+            );
+    }
+
+    private List<Class<?>> topologicalSort(Map<Class<?>, Set<Class<?>>> classGraph, Map<Class<?>, Integer> indegreeMap) {
+        Deque<Class<?>> zeroDegreeClasses = indegreeMap.entrySet().stream()
+                .filter(entry -> entry.getValue() == 0)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toCollection(ArrayDeque::new));
+
+        List<Class<?>> initializationOrder = new ArrayList<>();
+
+        while (!zeroDegreeClasses.isEmpty()) {
+            var cls = zeroDegreeClasses.poll();
+            initializationOrder.add(cls);
+
+            Set<Class<?>> dependentClasses = classGraph.entrySet().stream()
+                    .filter(entry -> entry.getValue().contains(cls))
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toSet());
+
+            indegreeMap.entrySet().stream()
+                    .filter(entry -> dependentClasses.contains(entry.getKey()))
+                    .peek(entry -> entry.setValue(entry.getValue() - 1))
+                    .filter(entry -> entry.getValue() == 0)
+                    .forEach(entry -> zeroDegreeClasses.push(entry.getKey()));
         }
 
-        Constructor<?>[] constructors = cls.getDeclaredConstructors();
-        // default constructor no need for inject acting as a base case
-        if (constructors.length == 1 && constructors[0].getParameterCount() == 0) {
-            Constructor<?> constructor = constructors[0];
-            constructor.setAccessible(true); // To bypass access modifiers
-            if (beanRegistry.containsKey(cls)) {
-                System.out.println("[ApplicationContext] getInstance cache hit after constructor lookup: " + cls.getName());
-                return (T) beanRegistry.get(cls);
-            } else {
-                try {
-                    System.out.println("[ApplicationContext] getInstance invoking default constructor: " + cls.getName());
-                    T obj = (T) constructor.newInstance();
-                    beanRegistry.put(cls, obj);
-                    System.out.println("[ApplicationContext] getInstance bean created: " + cls.getName());
-                    return obj;
-                } catch (InvocationTargetException | IllegalAccessException | InstantiationException e) {
-                    System.out.println("[ApplicationContext] getInstance default constructor failed for " + cls.getName() + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                    throw new RuntimeException(e);
-                }
-            }
-        }
-        Constructor<?>[] annotatedCons = Arrays.stream(constructors)
-                .filter(c -> c.isAnnotationPresent(Inject.class))
-                .toArray(Constructor[]::new);
-        if (annotatedCons.length > 1)
-            throw new AmbiguousConstructorException("Class " + cls.getName() + " has " + annotatedCons.length + " constructors — exactly one is required. " +
-                    "Annotate the intended constructor with @Inject.");
-        Constructor<?> constructor = annotatedCons[0];
-        Parameter[] parameters = constructor.getParameters();
-        for (var param : parameters) {
-            if (UNRESOLVABLE.contains(param.getType()))
-                throw new UnregisteredDependencyException(
-                        "Parameter '" + param.getName() + "' of type " + param.getType().getName() +
-                                " in " + cls.getName() + " is a primitive/value type and cannot be injected. " +
-                                "Use a dedicated configuration object instead."
-                );
-
-            if (!param.getType().isAnnotationPresent(Component.class) && !resolveMap.containsKey(param.getType()))
-                throw new UnregisteredDependencyException("Field '" + param.getName() + "' of type " + param.getType().getName() +
-                        " in " + cls.getName() + " is not registered as a bean.");
+        if (initializationOrder.size() < classGraph.size()) {
+            String unresolved = indegreeMap.entrySet().stream()
+                    .filter(entry -> entry.getValue() > 0)
+                    .map(entry -> entry.getKey().getName())
+                    .sorted()
+                    .collect(Collectors.joining(", "));
+            throw new CircularDependencyException(
+                    "DI error: circular dependency detected among beans: [" + unresolved + "]. " +
+                            "Review constructor dependencies to break the cycle."
+            );
         }
 
-        Class<?>[] paramClasses = Arrays.stream(parameters)
-                .map(Parameter::getType)
-                .toArray(Class<?>[]::new);
-        ArrayList<Object> beans = new ArrayList<>(paramClasses.length);
-        for (var paramClass : paramClasses) {
-            if (beanRegistry.containsKey(paramClass)) {
-                System.out.println("[ApplicationContext] getInstance dependency cache hit: " + paramClass.getName());
-                beans.add(beanRegistry.get(paramClass));
-            } else {
-                System.out.println("[ApplicationContext] getInstance dependency miss, resolving: " + paramClass.getName());
-                var bean = getInstance(paramClass);
-                beanRegistry.put(paramClass, bean);
-                beans.add(bean);
-            }
+        return initializationOrder;
+    }
+
+    private String resolveIdentifier(Class<?> cls) {
+        return cls.isAnnotationPresent(Qualifier.class)
+                ? cls.getAnnotation(Qualifier.class).value()
+                : cls.getSimpleName();
+    }
+
+    private void registerBean(Class<?> cls, String identifier, Supplier<?> supplier) {
+        BeanDefinition existing = definitions.get(identifier);
+        if (existing != null && !existing.cls().equals(cls)) {
+            throw new DuplicateBeanIdentifierException(
+                    "DI error: duplicate bean identifier '" + identifier + "' for beans '" + existing.cls().getName() +
+                            "' and '" + cls.getName() + "'. Identifiers must be unique."
+            );
         }
-        try {
-            constructor.setAccessible(true);
-            System.out.println("[ApplicationContext] getInstance invoking injected constructor: " + cls.getName());
-            T obj = (T) constructor.newInstance(beans.toArray());
-            beanRegistry.put(cls, obj);
-            System.out.println("[ApplicationContext] getInstance bean created: " + cls.getName());
-            return obj;
-        } catch (RuntimeException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
-            System.out.println("[ApplicationContext] getInstance injected constructor failed for " + cls.getName() + ": " + e.getClass().getSimpleName() + " - " + e.getMessage());
-            throw new RuntimeException(e);
+
+        beanRegistry.put(identifier, supplier);
+        definitions.put(identifier, new BeanDefinition(cls, identifier));
+        addTypeMapping(cls, identifier);
+        for (Class<?> abstraction : cls.getInterfaces()) {
+            addTypeMapping(abstraction, identifier);
+        }
+    }
+
+    private void addTypeMapping(Class<?> type, String identifier) {
+        List<String> identifiers = typeIndex.computeIfAbsent(type, _ -> new ArrayList<>());
+        if (!identifiers.contains(identifier)) {
+            identifiers.add(identifier);
         }
     }
 }

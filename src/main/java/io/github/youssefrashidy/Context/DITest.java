@@ -56,7 +56,7 @@ public class DITest {
     public static void main(String[] args) {
         System.out.println("=== Testing Dependency Injection Context ===\n");
 
-        ApplicationContextRef context = new ApplicationContextRef(DITest.class);
+        ApplicationContext context = new ApplicationContext(DITest.class);
 
         // Test 1: Retrieve a service with dependencies
         System.out.println("Test 1: Creating UserService with dependencies...");

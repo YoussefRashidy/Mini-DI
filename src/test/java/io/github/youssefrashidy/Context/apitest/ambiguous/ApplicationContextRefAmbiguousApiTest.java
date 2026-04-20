@@ -1,6 +1,6 @@
 package io.github.youssefrashidy.Context.apitest.ambiguous;
 
-import io.github.youssefrashidy.Context.ApplicationContextRef;
+import io.github.youssefrashidy.Context.ApplicationContext;
 import io.github.youssefrashidy.Exceptions.AmbiguousBeanException;
  
 public class ApplicationContextRefAmbiguousApiTest {
@@ -11,7 +11,7 @@ public class ApplicationContextRefAmbiguousApiTest {
     }
 
     private static void ambiguousLookupByTypeThrowsWhenMultipleBeansRegistered() {
-        ApplicationContextRef context = new ApplicationContextRef(AmbiguousScanAnchor.class);
+        ApplicationContext context = new ApplicationContext(AmbiguousScanAnchor.class);
 
         AmbiguousBeanException ex = assertThrows(
                 AmbiguousBeanException.class,
