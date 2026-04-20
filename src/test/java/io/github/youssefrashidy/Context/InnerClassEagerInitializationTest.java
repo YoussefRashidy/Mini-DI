@@ -28,7 +28,7 @@ public class InnerClassEagerInitializationTest {
         System.out.println("Inner-class eager initialization verified successfully.");
     }
 
-    static interface InnerGreetingService {
+    interface InnerGreetingService {
         String greet();
     }
 
@@ -51,4 +51,6 @@ public class InnerClassEagerInitializationTest {
         }
     }
 }
+
+
 
