@@ -2,6 +2,7 @@ package io.github.youssefrashidy.Exceptions;
 
 public class UnregisteredDependencyException extends RuntimeException{
     public UnregisteredDependencyException() {
+        super("DI error: unregistered dependency. A required bean is missing from the application context.");
     }
 
     public UnregisteredDependencyException(String message) {

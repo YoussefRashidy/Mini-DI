@@ -2,6 +2,7 @@ package io.github.youssefrashidy.Exceptions;
 
 public class AmbiguousBeanException extends RuntimeException{
     public AmbiguousBeanException() {
+        super("DI error: ambiguous bean resolution. Multiple candidate beans match the requested type; use @Qualifier to disambiguate.");
     }
 
     public AmbiguousBeanException(String message) {

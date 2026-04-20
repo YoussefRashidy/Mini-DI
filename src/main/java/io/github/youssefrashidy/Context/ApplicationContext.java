@@ -80,7 +80,13 @@ public class ApplicationContext {
             System.out.println("[ApplicationContext] resolving interface bean: " + cls.getName() + " -> " + classes);
             //TODO add exception message
             //TODO implement qualifiers
-            if (classes.size() > 1) throw new AmbiguousBeanException();
+            if (classes.size() > 1) {
+                String candidates = classes.stream().map(Class::getName).sorted().reduce((a, b) -> a + ", " + b).orElse("<none>");
+                throw new AmbiguousBeanException(
+                        "Multiple beans found for interface '" + cls.getName() + "': [" + candidates + "]. " +
+                                "Use @Qualifier to choose a specific implementation."
+                );
+            }
             else {
                 Class<?> beanCls = classes.getFirst();
                 System.out.println("[ApplicationContext] interface resolved to: " + beanCls.getName());
@@ -146,9 +152,18 @@ public class ApplicationContext {
                 if (paramClass.isInterface()) {
                     var implementations = resolveMap.get(paramClass);
                     System.out.println("[ApplicationContext] interface dependency " + paramClass.getName() + " implementations: " + implementations);
-                    if (implementations.size() > 1) throw new AmbiguousBeanException();
-                    else if (implementations.isEmpty())
-                        throw new UnregisteredDependencyException();
+                    if (implementations.size() > 1) {
+                        String candidates = implementations.stream().map(Class::getName).sorted().reduce((a, b) -> a + ", " + b).orElse("<none>");
+                        throw new AmbiguousBeanException(
+                                "Cannot resolve dependency interface '" + paramClass.getName() + "' while creating '" + cls.getName() +
+                                        "': multiple candidates found [" + candidates + "]. Use @Qualifier to disambiguate."
+                        );
+                    } else if (implementations.isEmpty()) {
+                        throw new UnregisteredDependencyException(
+                                "Cannot resolve dependency interface '" + paramClass.getName() + "' while creating '" + cls.getName() +
+                                        "': no implementation was registered as a bean."
+                        );
+                    }
                     resolvedClass = implementations.getFirst();
                 } else resolvedClass = paramClass;
                 if (beanRegistry.containsKey(resolvedClass)) {
@@ -185,9 +200,17 @@ public class ApplicationContext {
             Class<?> resolvedClass;
             var implementations = resolveMap.get(cls);
             System.out.println("[ApplicationContext] interface dependency " + cls.getName() + " implementations: " + implementations);
-            if (implementations.size() > 1) throw new AmbiguousBeanException();
-            else if (implementations.isEmpty())
-                throw new UnregisteredDependencyException();
+            if (implementations.size() > 1) {
+                String candidates = implementations.stream().map(Class::getName).sorted().reduce((a, b) -> a + ", " + b).orElse("<none>");
+                throw new AmbiguousBeanException(
+                        "Cannot resolve requested type '" + cls.getName() + "': multiple implementations found [" + candidates + "]. " +
+                                "Use @Qualifier to pick one implementation."
+                );
+            } else if (implementations.isEmpty()) {
+                throw new UnregisteredDependencyException(
+                        "Cannot resolve requested type '" + cls.getName() + "': no implementation was registered as a bean."
+                );
+            }
             resolvedClass = implementations.getFirst();
             return (T) beanRegistry.get(resolvedClass);
         }
