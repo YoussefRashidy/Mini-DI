@@ -58,6 +58,53 @@ public class ApplicationContextRef {
 
     }
 
+    public <T> T getInstance(Class<T> cls) {
+        List<String> identifiers = typeIndex.getOrDefault(cls, Collections.emptyList());
+        if (identifiers.isEmpty()) {
+            throw new UnregisteredDependencyException(
+                    "DI error: no bean registered for requested type '" + cls.getName() + "'."
+            );
+        }
+
+        if (identifiers.size() > 1) {
+            String candidates = identifiers.stream()
+                    .map(id -> definitions.get(id).cls().getName() + " as '" + id + "'")
+                    .sorted()
+                    .collect(Collectors.joining(", "));
+            throw new AmbiguousBeanException(
+                    "DI error: multiple beans registered for requested type '" + cls.getName() + "': [" + candidates +
+                            "]. Use getInstance(String, Class) with a qualifier identifier."
+            );
+        }
+
+        return getInstance(identifiers.getFirst(), cls);
+    }
+
+    public Object getInstance(String identifier) {
+        Supplier<?> supplier = beanRegistry.get(identifier);
+        if (supplier == null) {
+            throw new UnregisteredDependencyException(
+                    "DI error: no bean registered with identifier '" + identifier + "'."
+            );
+        }
+        return supplier.get();
+    }
+
+    public <T> T getInstance(String identifier, Class<T> expectedType) {
+        Object bean = getInstance(identifier);
+        if (!expectedType.isInstance(bean)) {
+            throw new UnregisteredDependencyException(
+                    "DI error: bean identifier '" + identifier + "' resolves to type '" + bean.getClass().getName() +
+                            "', not assignable to requested type '" + expectedType.getName() + "'."
+            );
+        }
+        return expectedType.cast(bean);
+    }
+
+    public Set<String> getBeanIdentifiers() {
+        return Collections.unmodifiableSet(definitions.keySet());
+    }
+
     private void instantiateBeans(List<Class<?>> initOrder) {
         for (var cls : initOrder) {
             Constructor<?>[] constructors = cls.getDeclaredConstructors();
@@ -278,6 +325,16 @@ public class ApplicationContextRef {
 
         beanRegistry.put(identifier, supplier);
         definitions.put(identifier, new BeanDefinition(cls, identifier));
-        typeIndex.computeIfAbsent(cls, _ -> new ArrayList<>()).add(identifier);
+        addTypeMapping(cls, identifier);
+        for (Class<?> abstraction : cls.getInterfaces()) {
+            addTypeMapping(abstraction, identifier);
+        }
+    }
+
+    private void addTypeMapping(Class<?> type, String identifier) {
+        List<String> identifiers = typeIndex.computeIfAbsent(type, _ -> new ArrayList<>());
+        if (!identifiers.contains(identifier)) {
+            identifiers.add(identifier);
+        }
     }
 }

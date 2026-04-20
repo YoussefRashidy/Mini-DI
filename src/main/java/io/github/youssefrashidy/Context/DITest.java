@@ -1,9 +1,8 @@
 package io.github.youssefrashidy.Context;
 
 import io.github.youssefrashidy.annotations.Inject;
+import io.github.youssefrashidy.annotations.Component;
 import io.github.youssefrashidy.annotations.Singelton;
-
-import java.util.Set;
 
 /**
  * A simple test class to demonstrate the DI context functionality.
@@ -13,6 +12,7 @@ public class DITest {
     /**
      * A simple service dependency
      */
+    @Component
     @Singelton
     static class DatabaseService {
         public String connect() {
@@ -23,6 +23,7 @@ public class DITest {
     /**
      * Another service dependency
      */
+    @Component
     @Singelton
     static class EmailService {
         public String sendEmail() {
@@ -33,6 +34,7 @@ public class DITest {
     /**
      * Application service that depends on the above services
      */
+    @Component
     @Singelton
     static class UserService {
         private DatabaseService databaseService;
@@ -54,7 +56,7 @@ public class DITest {
     public static void main(String[] args) {
         System.out.println("=== Testing Dependency Injection Context ===\n");
 
-        ApplicationContext context = new ApplicationContext(DITest.class);
+        ApplicationContextRef context = new ApplicationContextRef(DITest.class);
 
         // Test 1: Retrieve a service with dependencies
         System.out.println("Test 1: Creating UserService with dependencies...");

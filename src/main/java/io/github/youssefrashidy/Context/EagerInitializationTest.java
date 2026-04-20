@@ -1,12 +1,12 @@
 package io.github.youssefrashidy.Context;
 
 /**
- * Small runnable probe for verifying eager initialization in ApplicationContext.
+ * Small runnable probe for verifying eager initialization in ApplicationContextRef.
  */
 public class EagerInitializationTest {
 
     public static void main(String[] args) {
-        ApplicationContext context = new ApplicationContext(EagerInitializationTest.class);
+        ApplicationContextRef context = new ApplicationContextRef(EagerInitializationTest.class);
 
         if (GreetingServiceImpl.constructorCalls() != 1) {
             throw new AssertionError("Expected eager initialization to construct GreetingServiceImpl once, but got "
