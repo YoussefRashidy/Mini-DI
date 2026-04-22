@@ -8,13 +8,9 @@ import io.github.youssefrashidy.Exceptions.AmbiguousConstructorException;
 import io.github.youssefrashidy.Exceptions.CircularDependencyException;
 import io.github.youssefrashidy.Exceptions.DuplicateBeanIdentifierException;
 import io.github.youssefrashidy.Exceptions.UnregisteredDependencyException;
-import io.github.youssefrashidy.annotations.Component;
-import io.github.youssefrashidy.annotations.Inject;
-import io.github.youssefrashidy.annotations.Qualifier;
+import io.github.youssefrashidy.annotations.*;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Parameter;
+import java.lang.reflect.*;
 import java.util.*;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -110,17 +106,9 @@ public class ApplicationContext {
             Constructor<?>[] constructors = cls.getDeclaredConstructors();
             // check default Constructor
             if (constructors.length == 1 && constructors[0].getParameterCount() == 0) {
-                String identifier = resolveIdentifier(cls);
                 Constructor<?> cons = constructors[0];
                 cons.setAccessible(true);
-                try {
-                    var instance = cons.newInstance(new Object[0]);
-                    Supplier<?> supplier = () -> instance;
-                    registerBean(cls, identifier, supplier);
-
-                } catch (InvocationTargetException | IllegalAccessException | InstantiationException e) {
-                    throw new RuntimeException(e);
-                }
+                resolveScope(cls, cons, new Parameter[0]);
             } else {
                 // This is valid because of the way the graph is built
                 var annotatedConstructor = Arrays.stream(constructors)
@@ -131,37 +119,85 @@ public class ApplicationContext {
                 Parameter[] params = annotatedConstructor.getParameters();
                 ArrayList<Object> beans = new ArrayList<>(params.length);
 
-                for (var param : params) {
-                    if (param.getType().isInterface()) {
-                        // if annotated get by annotation
-                        String identifier;
-                        if (param.isAnnotationPresent(Qualifier.class)) {
-                            identifier = param.getAnnotation(Qualifier.class).value();
-                            var paramInstance = beanRegistry.get(identifier).get();
-                            beans.add(paramInstance);
-                        } else {
-                            var paramCls = resolveMap.get(param.getType()).getFirst();
-                            identifier = resolveIdentifier(paramCls);
-                            Object paramInstance = beanRegistry.get(identifier).get();
-                            beans.add(paramInstance);
-                        }
-                    } else {
-                        String identifier = resolveIdentifier(param.getType());
-                        beans.add(beanRegistry.get(identifier).get());
-                    }
-                }
-                try {
-                    Object instance = annotatedConstructor.newInstance(beans.toArray());
-                    String identifier = resolveIdentifier(cls);
-                    Supplier<?> supplier = () -> instance;
-                    registerBean(cls, identifier, supplier);
-                } catch (InvocationTargetException | InstantiationException | IllegalAccessException e) {
-                    throw new RuntimeException(e);
-                }
-
+//                for (var param : params) {
+//                    resolveParameter(param, beans);
+//                }
+                resolveScope(cls, annotatedConstructor, params);
             }
         }
     }
+
+    private void resolveScope(Class<?> cls, Constructor<?> annotatedConstructor, Parameter[] params) {
+        try {
+            String identifier = resolveIdentifier(cls);
+            if (cls.isAnnotationPresent(Scope.class) && cls.getAnnotation(Scope.class).value().equals(ScopeType.PROTOTYPE)) {
+
+                /*
+                 * fix resolve the types dynamically to avoid singelton prototypes inside prototype
+                 */
+                Supplier<?> supplier = () -> {
+                    try {
+                        ArrayList<Object> beans = new ArrayList<>();
+                        for (var para : params) {
+                            resolveParameter(para, beans);
+                        }
+                        return annotatedConstructor.newInstance(beans.toArray());
+                    } catch (InstantiationException | InvocationTargetException |
+                             IllegalAccessException e) {
+                        throw new RuntimeException(e);
+                    }
+                };
+                registerBean(cls, identifier, supplier);
+            } else {
+                ArrayList<Object> beans = new ArrayList<>();
+                for (Parameter parameter : params) resolveParameter(parameter, beans);
+                Object instance = annotatedConstructor.newInstance(beans.toArray());
+                Supplier<?> supplier = () -> instance;
+                registerBean(cls, identifier, supplier);
+            }
+        } catch (InvocationTargetException | InstantiationException | IllegalAccessException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void resolveParameter(Parameter param, ArrayList<Object> beans) {
+        var type = param.getType();
+        boolean isSupplier = param.getType() == Supplier.class;
+        if (isSupplier) {
+            Type generic = param.getParameterizedType();
+
+            if (!(generic instanceof ParameterizedType))
+                throw new UnregisteredDependencyException(
+                        "DI error: Supplier parameter '" + param.getName() + "' must have a type argument e.g. Supplier<Foo>."
+                );
+
+            type = (Class<?>) ((ParameterizedType) generic).getActualTypeArguments()[0];
+            type = resolveParamType(param,type) ;
+            if (!type.isAnnotationPresent(Scope.class) || type.getAnnotation(Scope.class).value() != ScopeType.PROTOTYPE)
+                throw new UnregisteredDependencyException(
+                        "DI error: Supplier<" + type.getSimpleName() + "> wraps a non-prototype bean. " +
+                                "Only prototype beans may be injected as Supplier."
+                );
+        }
+        if (type.isInterface()) {
+            // if annotated get by annotation
+            String identifier;
+            if (param.isAnnotationPresent(Qualifier.class)) {
+                identifier = param.getAnnotation(Qualifier.class).value();
+                var paramInstance = isSupplier ? (Supplier<?>) () -> beanRegistry.get(identifier).get() : beanRegistry.get(identifier).get();
+                beans.add(paramInstance);
+            } else {
+                var paramCls = resolveMap.get(type).getFirst();
+                identifier = resolveIdentifier(paramCls);
+                Object paramInstance = isSupplier ? (Supplier<?>) () -> beanRegistry.get(identifier).get() : beanRegistry.get(identifier).get();
+                beans.add(paramInstance);
+            }
+        } else {
+            String identifier = resolveIdentifier(type);
+            beans.add(isSupplier ? (Supplier<?>) () -> beanRegistry.get(identifier).get() : beanRegistry.get(identifier).get());
+        }
+    }
+
 
     private void resolvePackages() {
         try (ScanResult scanResult = new ClassGraph()
@@ -207,20 +243,31 @@ public class ApplicationContext {
             Parameter[] params = constructor.getParameters();
 
             for (var param : params) {
-                if (UNRESOLVABLE.contains(param.getType()))
+                Class<?> type = param.getType();
+                if (type == Supplier.class) {
+                    Type generic = param.getParameterizedType();
+                    if (!(generic instanceof ParameterizedType)) {
+                        throw new UnregisteredDependencyException(
+                                "DI error: Supplier parameter '" + param.getName() + "' must have a type argument e.g. Supplier<Foo>."
+                        );
+                    }
+                    type = (Class<?>) ((ParameterizedType) generic).getActualTypeArguments()[0];
+                }
+
+                if (UNRESOLVABLE.contains(type))
                     throw new UnregisteredDependencyException(
-                            "DI error: cannot inject parameter '" + param.getName() + "' of type '" + param.getType().getName() +
+                            "DI error: cannot inject parameter '" + param.getName() + "' of type '" + type.getName() +
                                     "' in bean '" + cls.getName() + "' because primitive/value types are not supported. " +
                                     "Use a dedicated configuration bean instead."
                     );
 
-                if (!param.getType().isAnnotationPresent(Component.class) && !resolveMap.containsKey(param.getType()))
+                if (!type.isAnnotationPresent(Component.class) && !resolveMap.containsKey(type))
                     throw new UnregisteredDependencyException(
-                            "DI error: missing bean for parameter '" + param.getName() + "' of type '" + param.getType().getName() +
+                            "DI error: missing bean for parameter '" + param.getName() + "' of type '" + type.getName() +
                                     "' required by bean '" + cls.getName() + "'."
                     );
                 // handle interfaces
-                var candidateClass = param.getType().isInterface() ? resolveParamType(param) : param.getType();
+                var candidateClass = resolveParamType(param);
                 classGraph.computeIfAbsent(cls, _ -> new HashSet<Class<?>>()).add(candidateClass);
 
             }
@@ -229,38 +276,60 @@ public class ApplicationContext {
     }
 
     private Class<?> resolveParamType(Parameter param) {
-        var classes = resolveMap.get(param.getType());
+        var type = param.getType();
+
+        if (type == Supplier.class) {
+            Type generic = param.getParameterizedType();
+
+            if (!(generic instanceof ParameterizedType))
+                throw new UnregisteredDependencyException(
+                        "DI error: Supplier parameter '" + param.getName() + "' must have a type argument e.g. Supplier<Foo>."
+                );
+
+            type = (Class<?>) ((ParameterizedType) generic).getActualTypeArguments()[0];
+            type = resolveParamType(param,type);
+            if (!type.isAnnotationPresent(Scope.class) || type.getAnnotation(Scope.class).value() != ScopeType.PROTOTYPE)
+                throw new UnregisteredDependencyException(
+                        "DI error: Supplier<" + type.getSimpleName() + "> wraps a non-prototype bean. " +
+                                "Only prototype beans may be injected as Supplier."
+                );
+        }
+        return resolveParamType(param, type);
+    }
+
+    private Class<?> resolveParamType(Parameter param, Class<?> type) {
+        if (!type.isInterface())
+            return type;
+        var classes = resolveMap.get(type);
 
         if (classes.size() > 1) {
             // Look for qualifier over the field
             if (param.isAnnotationPresent(Qualifier.class)) {
                 String val = param.getAnnotation(Qualifier.class).value();
-                var candidates = resolveMap.get(param.getType()).stream()
+                var candidates = resolveMap.get(type).stream()
                         .filter(cls -> cls.isAnnotationPresent(Qualifier.class) && cls.getAnnotation(Qualifier.class).value().equals(val))
                         .toList();
                 if (candidates.size() > 1)
                     throw new AmbiguousBeanException(
-                            "DI error: multiple beans match qualifier '" + val + "' for interface '" + param.getType().getName() +
+                            "DI error: multiple beans match qualifier '" + val + "' for interface '" + type.getName() +
                                     "' on parameter '" + param.getName() + "': [" +
                                     candidates.stream().map(Class::getName).sorted().collect(Collectors.joining(", ")) + "]."
                     );
                 if (candidates.isEmpty())
                     throw new AmbiguousBeanException(
-                            "DI error: no bean matches qualifier '" + val + "' for interface '" + param.getType().getName() +
+                            "DI error: no bean matches qualifier '" + val + "' for interface '" + type.getName() +
                                     "' on parameter '" + param.getName() + "'."
                     );
 
                 return candidates.getFirst();
-            }
-            else {
+            } else {
                 String candidates = classes.stream().map(Class::getName).sorted().collect(Collectors.joining(", "));
                 throw new AmbiguousBeanException(
-                        "DI error: multiple beans found for interface '" + param.getType().getName() + "' on parameter '" +
+                        "DI error: multiple beans found for interface '" + type.getName() + "' on parameter '" +
                                 param.getName() + "': [" + candidates + "]. Add @Qualifier to disambiguate."
                 );
             }
-        }
-        else if (classes.size() == 1)
+        } else if (classes.size() == 1)
             return classes.getFirst();
         else
             throw new UnregisteredDependencyException(
