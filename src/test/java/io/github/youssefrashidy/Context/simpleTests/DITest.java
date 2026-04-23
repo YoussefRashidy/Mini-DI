@@ -1,5 +1,6 @@
 package io.github.youssefrashidy.Context.simpleTests;
 
+import io.github.youssefrashidy.Context.AnnotationConfigApplicationContext;
 import io.github.youssefrashidy.Context.ApplicationContext;
 import io.github.youssefrashidy.annotations.Inject;
 import io.github.youssefrashidy.annotations.Component;
@@ -57,7 +58,7 @@ public class DITest {
     public static void main(String[] args) {
         System.out.println("=== Testing Dependency Injection Context ===\n");
 
-        ApplicationContext context = new ApplicationContext(DITest.class);
+        ApplicationContext context = new AnnotationConfigApplicationContext(DITest.class);
 
         // Test 1: Retrieve a service with dependencies
         System.out.println("Test 1: Creating UserService with dependencies...");

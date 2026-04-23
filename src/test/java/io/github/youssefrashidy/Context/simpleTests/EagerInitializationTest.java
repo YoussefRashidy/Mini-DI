@@ -1,5 +1,6 @@
 package io.github.youssefrashidy.Context.simpleTests;
 
+import io.github.youssefrashidy.Context.AnnotationConfigApplicationContext;
 import io.github.youssefrashidy.Context.ApplicationContext;
 
 /**
@@ -8,7 +9,7 @@ import io.github.youssefrashidy.Context.ApplicationContext;
 public class EagerInitializationTest {
 
     public static void main(String[] args) {
-        ApplicationContext context = new ApplicationContext(EagerInitializationTest.class);
+        ApplicationContext context = new AnnotationConfigApplicationContext(EagerInitializationTest.class);
 
         if (GreetingServiceImpl.constructorCalls() != 1) {
             throw new AssertionError("Expected eager initialization to construct GreetingServiceImpl once, but got "

@@ -1,0 +1,26 @@
+ComponentScanner
+    - owns: resolveMap, componentList
+    - produces: ScanMap (record wrapping both)
+
+DependencyGraphBuilder
+    - takes: ScanResult
+    - owns: UNRESOLVABLE
+    - produces: List<Class<?>> initOrder (already sorted)
+
+BeanInstantiator
+    - takes: ScanResult, initOrder
+    - owns: instantiation + scope logic
+    - writes into: BeanContainer
+
+BeanContainer
+    - owns: beanRegistry, definitions, typeIndex
+    - exposes: registerBean, getInstance, getBeanIdentifiers
+
+DependencyResolver
+
+ApplicationContext
+    - owns: ContextConfig
+    - orchestrates the pipeline
+    - delegates getInstance to BeanContainer
+
+Application context will be converted to an interface while concrete class will be AnnotationConfigApplicationContext

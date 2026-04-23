@@ -1,5 +1,6 @@
 package io.github.youssefrashidy.Context.simpleTests;
 
+import io.github.youssefrashidy.Context.AnnotationConfigApplicationContext;
 import io.github.youssefrashidy.Context.ApplicationContext;
 import io.github.youssefrashidy.annotations.Component;
 import io.github.youssefrashidy.annotations.Singelton;
@@ -12,7 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class InnerClassEagerInitializationTest {
 
     public static void main(String[] args) {
-        ApplicationContext context = new ApplicationContext(InnerClassEagerInitializationTest.class);
+        ApplicationContext context = new AnnotationConfigApplicationContext(InnerClassEagerInitializationTest.class);
 
         if (InnerGreetingServiceImpl.constructorCalls() != 1) {
             throw new AssertionError("Expected eager initialization to construct InnerGreetingServiceImpl once, but got "

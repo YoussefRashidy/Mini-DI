@@ -1,6 +1,6 @@
 package io.github.youssefrashidy.Context.apitest.prototype.invalid;
 
-import io.github.youssefrashidy.Context.ApplicationContext;
+import io.github.youssefrashidy.Context.AnnotationConfigApplicationContext;
 import io.github.youssefrashidy.Exceptions.UnregisteredDependencyException;
 
 public class ApplicationContextPrototypeInvalidApiTest {
@@ -13,7 +13,7 @@ public class ApplicationContextPrototypeInvalidApiTest {
     private static void supplierOfSingletonIsRejected() {
         UnregisteredDependencyException ex = assertThrows(
                 UnregisteredDependencyException.class,
-                () -> new ApplicationContext(InvalidPrototypeSupplierScanAnchor.class),
+                () -> new AnnotationConfigApplicationContext(InvalidPrototypeSupplierScanAnchor.class),
                 "Supplier of singleton dependency should fail initialization."
         );
 
