@@ -1,6 +1,6 @@
 ComponentScanner
     - owns: resolveMap, componentList
-    - produces: ScanResult (record wrapping both)
+    - produces: ScanMap (record wrapping both)
 
 DependencyGraphBuilder
     - takes: ScanResult
@@ -15,6 +15,8 @@ BeanInstantiator
 BeanContainer
     - owns: beanRegistry, definitions, typeIndex
     - exposes: registerBean, getInstance, getBeanIdentifiers
+
+DependencyResolver
 
 ApplicationContext
     - owns: ContextConfig
