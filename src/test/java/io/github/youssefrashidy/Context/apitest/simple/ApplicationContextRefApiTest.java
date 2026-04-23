@@ -1,5 +1,6 @@
 package io.github.youssefrashidy.Context.apitest.simple;
 
+import io.github.youssefrashidy.Context.AnnotationConfigApplicationContext;
 import io.github.youssefrashidy.Context.ApplicationContext;
 import io.github.youssefrashidy.Context.apitest.duplicate.DuplicateIdentifierScanAnchor;
 import io.github.youssefrashidy.Exceptions.DuplicateBeanIdentifierException;
@@ -18,7 +19,7 @@ public class ApplicationContextRefApiTest {
     }
 
     private static void getInstanceByTypeAndIdentifierReturnsSameSingleton() {
-        ApplicationContext context = new ApplicationContext(SimpleApiScanAnchor.class);
+        ApplicationContext context = new AnnotationConfigApplicationContext(SimpleApiScanAnchor.class);
 
         GreetingFacade facade = context.getInstance(GreetingFacade.class);
         assertEquals("hello", facade.message(), "GreetingFacade message should come from injected bean.");
@@ -30,14 +31,14 @@ public class ApplicationContextRefApiTest {
     }
 
     private static void beanIdentifiersExposeRegisteredBeans() {
-        ApplicationContext context = new ApplicationContext(SimpleApiScanAnchor.class);
+        ApplicationContext context = new AnnotationConfigApplicationContext(SimpleApiScanAnchor.class);
 
         assertTrue(context.getBeanIdentifiers().contains("primaryGreeting"), "Expected qualifier identifier to be visible.");
         assertTrue(context.getBeanIdentifiers().contains("GreetingFacade"), "Expected class-name identifier to be visible.");
     }
 
     private static void unknownIdentifierThrowsExpressiveError() {
-        ApplicationContext context = new ApplicationContext(SimpleApiScanAnchor.class);
+        ApplicationContext context = new AnnotationConfigApplicationContext(SimpleApiScanAnchor.class);
 
         UnregisteredDependencyException ex = assertThrows(
                 UnregisteredDependencyException.class,
@@ -49,7 +50,7 @@ public class ApplicationContextRefApiTest {
     }
 
     private static void wrongExpectedTypeThrowsExpressiveError() {
-        ApplicationContext context = new ApplicationContext(SimpleApiScanAnchor.class);
+        ApplicationContext context = new AnnotationConfigApplicationContext(SimpleApiScanAnchor.class);
 
         UnregisteredDependencyException ex = assertThrows(
                 UnregisteredDependencyException.class,
@@ -63,7 +64,7 @@ public class ApplicationContextRefApiTest {
     private static void duplicateIdentifierFailsFastDuringInitialization() {
         DuplicateBeanIdentifierException ex = assertThrows(
                 DuplicateBeanIdentifierException.class,
-                () -> new ApplicationContext(DuplicateIdentifierScanAnchor.class),
+                () -> new AnnotationConfigApplicationContext(DuplicateIdentifierScanAnchor.class),
                 "Duplicate identifiers should fail context initialization."
         );
 

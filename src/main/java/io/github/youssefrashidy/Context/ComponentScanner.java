@@ -1,15 +1,17 @@
-package io.github.youssefrashidy.Context.refactor;
+package io.github.youssefrashidy.Context;
 
 import io.github.classgraph.ClassGraph;
 import io.github.classgraph.ClassInfo;
 import io.github.classgraph.ScanResult;
-import io.github.youssefrashidy.Context.ContextConfig;
 import io.github.youssefrashidy.annotations.Component;
 
 import java.util.*;
 
 public class ComponentScanner {
 
+    public ScanMap scan(ContextConfig config) {
+        return resolvePackages(config.basePackages());
+    }
 
     private ScanMap resolvePackages(Set<String> basePackages) {
         final Map<Class<?>, List<Class<?>>> resolveMap = new HashMap<>();
@@ -30,6 +32,6 @@ public class ComponentScanner {
                 }
             }
         }
-        return new ScanMap(resolveMap,componentList) ;
+        return new ScanMap(resolveMap, componentList);
     }
 }

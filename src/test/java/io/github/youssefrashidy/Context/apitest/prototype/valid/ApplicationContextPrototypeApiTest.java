@@ -1,5 +1,6 @@
 package io.github.youssefrashidy.Context.apitest.prototype.valid;
 
+import io.github.youssefrashidy.Context.AnnotationConfigApplicationContext;
 import io.github.youssefrashidy.Context.ApplicationContext;
 import java.util.Objects;
 
@@ -13,14 +14,14 @@ public class ApplicationContextPrototypeApiTest {
     }
 
     private static void prototypeBeanIsNotEagerlyConstructed() {
-        new ApplicationContext(PrototypeApiScanAnchor.class);
+        new AnnotationConfigApplicationContext(PrototypeApiScanAnchor.class);
 
         assertEquals(0, PrototypeTokenServiceImpl.constructorCalls(),
                 "Prototype bean should not be created during context bootstrap.");
     }
 
     private static void lookupByTypeAndIdentifierCreatesFreshInstances() {
-        ApplicationContext context = new ApplicationContext(PrototypeApiScanAnchor.class);
+        ApplicationContext context = new AnnotationConfigApplicationContext(PrototypeApiScanAnchor.class);
 
         PrototypeTokenService byType1 = context.getInstance(PrototypeTokenService.class);
         PrototypeTokenService byType2 = context.getInstance(PrototypeTokenService.class);
@@ -33,7 +34,7 @@ public class ApplicationContextPrototypeApiTest {
     }
 
     private static void supplierInjectionCreatesFreshPrototypeInstances() {
-        ApplicationContext context = new ApplicationContext(PrototypeApiScanAnchor.class);
+        ApplicationContext context = new AnnotationConfigApplicationContext(PrototypeApiScanAnchor.class);
         PrototypeConsumer consumer = context.getInstance(PrototypeConsumer.class);
 
         int firstSerial = consumer.nextTokenSerial();
