@@ -37,14 +37,14 @@ public class DependencyGraphBuilder {
 		this.dependencyResolver = dependencyResolver;
 	}
 
-	public List<Class<?>> buildInitializationOrder(ScanMap scanMap) {
+	public List<Class<?>> buildInitializationOrder(ScanMap scanMap, ConfigurationContext configurationContext) {
 		Map<Class<?>, Set<Class<?>>> classGraph = new HashMap<>();
 		Map<Class<?>, Integer> indegreeMap = new HashMap<>();
-		buildMaps(scanMap, classGraph, indegreeMap);
+		buildMaps(scanMap,configurationContext ,classGraph, indegreeMap);
 		return topologicalSort(classGraph, indegreeMap);
 	}
 
-	private void buildMaps(ScanMap scanMap, Map<Class<?>, Set<Class<?>>> classGraph, Map<Class<?>, Integer> indegreeMap) {
+	private void buildMaps(ScanMap scanMap, ConfigurationContext configurationContext, Map<Class<?>, Set<Class<?>>> classGraph, Map<Class<?>, Integer> indegreeMap) {
 		for (var cls : scanMap.componentList()) {
 			Constructor<?>[] constructors = cls.getDeclaredConstructors();
 			if (constructors.length == 1 && constructors[0].getParameterCount() == 0) {
@@ -85,7 +85,8 @@ public class DependencyGraphBuilder {
 					);
 				}
 
-				if (!type.isAnnotationPresent(Component.class) && !scanMap.resolveMap().containsKey(type)) {
+				// add method to check for both components and beans methods
+				if (isResolvable(scanMap, configurationContext,type)) {
 					throw new UnregisteredDependencyException(
 							"DI error: missing bean for parameter '" + param.getName() + "' of type '" + type.getName() +
 									"' required by bean '" + cls.getName() + "'."
@@ -97,6 +98,10 @@ public class DependencyGraphBuilder {
 			}
 			indegreeMap.put(cls, classGraph.get(cls).size());
 		}
+	}
+
+	private static boolean isResolvable(ScanMap scanMap,ConfigurationContext configurationContext ,Class<?> type) {
+		return !type.isAnnotationPresent(Component.class) && !scanMap.resolveMap().containsKey(type);
 	}
 
 	private List<Class<?>> topologicalSort(Map<Class<?>, Set<Class<?>>> classGraph, Map<Class<?>, Integer> indegreeMap) {

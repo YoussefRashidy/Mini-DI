@@ -21,11 +21,13 @@ public class AnnotationConfigApplicationContext implements ApplicationContext {
 	private void initializeContext() {
 		ComponentScanner scanner = new ComponentScanner();
 		DependencyResolver resolver = new DependencyResolver();
+		ConfigurationClassProcessor processor = new ConfigurationClassProcessor() ;
 		DependencyGraphBuilder graphBuilder = new DependencyGraphBuilder(resolver);
 		BeanInstantiator beanInstantiator = new BeanInstantiator(resolver);
 
 		ScanMap scanMap = scanner.scan(config);
-		var initOrder = graphBuilder.buildInitializationOrder(scanMap);
+		ConfigurationContext configurationContext = processor.processConfigurationClasses(scanMap.configurationClasses(), beanContainer) ;
+		var initOrder = graphBuilder.buildInitializationOrder(scanMap , configurationContext);
 		beanInstantiator.instantiateBeans(scanMap, initOrder, beanContainer);
 	}
 
