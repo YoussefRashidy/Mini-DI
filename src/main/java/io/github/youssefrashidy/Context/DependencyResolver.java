@@ -92,4 +92,7 @@ public class DependencyResolver {
 		return classes.getFirst();
 	}
 
+	public AnnotationBeanDefinition resolveAnnotationBeanDefinition(Class<?> cls) {
+		return new AnnotationBeanDefinition(cls, resolveIdentifier(cls));
+	}
 }
