@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.stream.Collectors;
 
 public class ConfigurationClassProcessor {
     public ConfigurationContext processConfigurationClasses(List<Class<?>> configurationClasses, BeanContainer container) {
@@ -37,13 +38,13 @@ public class ConfigurationClassProcessor {
 
         // Important here declared type is used which may not be concrete class so check it carefully since components are
         // assigned using their concrete classes
-        List<BeanDefinition> definitions = proxies.keySet().stream()
+        List<MethodBeanDefinition> definitions = proxies.keySet().stream()
                 .flatMap(cls -> Arrays.stream(cls.getMethods()))
                 .filter(method -> method.isAnnotationPresent(Bean.class))
-                .map(method -> new BeanDefinition(method.getReturnType().getClass(),(method.isAnnotationPresent(Bean.class) &&
+                .map(method -> new MethodBeanDefinition(method.getReturnType(),method,proxies.get(method.getDeclaringClass()),(method.isAnnotationPresent(Bean.class) &&
                         !method.getAnnotation(Bean.class).value().isEmpty()) ?
                         method.getAnnotation(Bean.class).value() : method.getName()))
-                .toList();
+                .collect(Collectors.toList());
         return new ConfigurationContext(proxies, definitions);
     }
 

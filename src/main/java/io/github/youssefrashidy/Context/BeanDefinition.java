@@ -1,4 +1,5 @@
 package io.github.youssefrashidy.Context;
 
-public record BeanDefinition(Class<?> cls , String identifier) {
+public sealed interface BeanDefinition permits AnnotationBeanDefinition , MethodBeanDefinition {
+	String getName();
 }
