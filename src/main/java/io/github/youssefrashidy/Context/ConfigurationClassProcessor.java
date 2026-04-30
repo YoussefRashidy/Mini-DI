@@ -1,6 +1,7 @@
 package io.github.youssefrashidy.Context;
 
 import io.github.youssefrashidy.annotations.Bean;
+import io.github.youssefrashidy.annotations.ScopeType;
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.bind.annotation.Origin;
@@ -48,7 +49,7 @@ public class ConfigurationClassProcessor {
         return new ConfigurationContext(proxies, definitions);
     }
 
-    private static class BeanInterceptor {
+    public static class BeanInterceptor {
         private final BeanContainer container;
 
         BeanInterceptor(BeanContainer container) {
@@ -57,8 +58,28 @@ public class ConfigurationClassProcessor {
 
         @RuntimeType
         public Object intercept(@Origin Method method, @SuperCall Callable<?> sup, @This Object proxy) throws Exception {
-            String beanIdentifier = (method.isAnnotationPresent(Bean.class) && !method.getAnnotation(Bean.class).value().isEmpty()) ?
-                    method.getAnnotation(Bean.class).value() : method.getName();
+            Bean bean = method.getAnnotation(Bean.class);
+            if (bean == null) {
+                try {
+                    Method original = method.getDeclaringClass()
+                            .getSuperclass()
+                            .getMethod(method.getName(), method.getParameterTypes());
+                    bean = original.getAnnotation(Bean.class);
+                } catch (NoSuchMethodException e) {
+                    throw new IllegalStateException(
+                            "DI error: failed to locate original @Bean method for '" +
+                                    method.getDeclaringClass().getName() + "#" + method.getName() + "'.",
+                            e
+                    );
+                }
+            }
+
+            if (bean != null && bean.scope() == ScopeType.PROTOTYPE) {
+                return sup.call();
+            }
+            String beanIdentifier = (bean != null && !bean.value().isEmpty())
+                    ? bean.value()
+                    : method.getName();
             if (container.containsIdentifier(beanIdentifier)) return container.getInstance(beanIdentifier);
             else return sup.call();
         }

@@ -110,6 +110,11 @@ public class DependencyGraphBuilder {
              * it will be handled automatically with topo sort
              */
             Parameter[] params = beanDefinition.beanMethod().getParameters();
+            if (params.length == 0) {
+                classGraph.put(beanDefinition, Collections.emptySet());
+                indegreeMap.put(beanDefinition, 0);
+                continue;
+            }
 
             for (var param : params) {
                 Class<?> type = param.getType();
