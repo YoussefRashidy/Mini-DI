@@ -38,19 +38,23 @@ public class DependencyGraphBuilder {
     }
 
     public List<BeanDefinition> buildInitializationOrder(ScanMap scanMap, ConfigurationContext configurationContext) {
+        System.out.println("[DI] Building initialization order");
         Map<BeanDefinition, Set<BeanDefinition>> classGraph = new HashMap<>();
         Map<BeanDefinition, Integer> indegreeMap = new HashMap<>();
         buildMaps(scanMap, configurationContext, classGraph, indegreeMap);
+        System.out.println("[DI] Graph nodes=" + classGraph.size());
         return topologicalSort(classGraph, indegreeMap);
     }
 
     private void buildMaps(ScanMap scanMap, ConfigurationContext configurationContext, Map<BeanDefinition, Set<BeanDefinition>> classGraph, Map<BeanDefinition, Integer> indegreeMap) {
+        System.out.println("[DI] Scanning components=" + scanMap.componentList().size() + ", configBeans=" + configurationContext.beanDefinitions().size());
         for (var cls : scanMap.componentList()) {
+            System.out.println("[DI] Analyze component=" + cls.getName());
             AnnotationBeanDefinition annotationDefinition = dependencyResolver.resolveAnnotationBeanDefinition(cls);
             Constructor<?>[] constructors = cls.getDeclaredConstructors();
             if (constructors.length == 1 && constructors[0].getParameterCount() == 0) {
-                classGraph.put(dependencyResolver.resolveAnnotationBeanDefinition(cls), Collections.emptySet());
-                indegreeMap.put(dependencyResolver.resolveAnnotationBeanDefinition(cls), 0);
+                classGraph.put(annotationDefinition, Collections.emptySet());
+                indegreeMap.put(annotationDefinition, 0);
                 continue;
             }
 
@@ -88,27 +92,22 @@ public class DependencyGraphBuilder {
 
                 // add method to check for both components and beans methods
                 if (!isResolvable(scanMap, configurationContext, type)) {
+                    System.out.println("[DI] Missing dependency type=" + type.getName() + " for bean=" + annotationDefinition.identifier());
                     throw new UnregisteredDependencyException(
                             "DI error: missing bean for parameter '" + param.getName() + "' of type '" + type.getName() +
                                     "' required by bean '" + annotationDefinition.identifier() + "'."
                     );
                 }
 
-                var candidateClass = dependencyResolver.resolveParamType(param, scanMap.resolveMap());
-                classGraph.computeIfAbsent(dependencyResolver.resolveAnnotationBeanDefinition(cls), _ -> new HashSet<>()).add(dependencyResolver.resolveAnnotationBeanDefinition(candidateClass));
+                var candidateClass = dependencyResolver.resolveParamType(param, scanMap.resolveMap(), configurationContext);
+                AnnotationBeanDefinition candidateDefinition = dependencyResolver.resolveAnnotationBeanDefinition(candidateClass, configurationContext, param);
+                System.out.println("[DI] Resolved dependency " + type.getName() + " -> " + candidateClass.getName());
+                classGraph.computeIfAbsent(annotationDefinition, _ -> new HashSet<>()).add(candidateDefinition);
             }
-            indegreeMap.put(dependencyResolver.resolveAnnotationBeanDefinition(cls), classGraph.get(dependencyResolver.resolveAnnotationBeanDefinition(cls)).size());
+            indegreeMap.put(annotationDefinition, classGraph.get(annotationDefinition).size());
         }
         for (var beanDefinition : configurationContext.beanDefinitions()) {
-            /*
-             * Two cases
-             * 1. bean has no parameter then fine added it
-             * (note it may call other bean methods that do have parameters so the check recursive)
-             * 2. bean has explicitly parameters only
-             * (the same idea it might depend on beans that depend on other bean)
-             * Actually this is a hallucination concern it doesn't really matter
-             * it will be handled automatically with topo sort
-             */
+            System.out.println("[DI] Analyze config bean=" + beanDefinition.identifier());
             Parameter[] params = beanDefinition.beanMethod().getParameters();
             if (params.length == 0) {
                 classGraph.put(beanDefinition, Collections.emptySet());
@@ -141,6 +140,7 @@ public class DependencyGraphBuilder {
 
                 // add method to check for both components and beans methods
                 if (!isResolvable(scanMap, configurationContext, type)) {
+                    System.out.println("[DI] Missing dependency type=" + type.getName() + " for config bean=" + beanDefinition.identifier());
                     throw new UnregisteredDependencyException(
                             "DI error: missing bean for parameter '" + param.getName() + "' of type '" + type.getName() +
                                     "' required by configuration bean method '" + beanDefinition.beanMethod().getDeclaringClass().getName() + "#" +
@@ -148,8 +148,10 @@ public class DependencyGraphBuilder {
                     );
                 }
 
-                var candidateClass = dependencyResolver.resolveParamType(param, scanMap.resolveMap());
-                classGraph.computeIfAbsent(beanDefinition, _ -> new HashSet<>()).add(dependencyResolver.resolveAnnotationBeanDefinition(candidateClass));
+                var candidateClass = dependencyResolver.resolveParamType(param, scanMap.resolveMap(), configurationContext);
+                AnnotationBeanDefinition candidateDefinition = dependencyResolver.resolveAnnotationBeanDefinition(candidateClass, configurationContext,param);
+                System.out.println("[DI] Resolved dependency " + type.getName() + " -> " + candidateClass.getName());
+                classGraph.computeIfAbsent(beanDefinition, _ -> new HashSet<>()).add(candidateDefinition);
             }
             indegreeMap.put(beanDefinition, classGraph.get(beanDefinition).size());
         }
@@ -157,7 +159,7 @@ public class DependencyGraphBuilder {
 
     private static boolean isResolvable(ScanMap scanMap, ConfigurationContext configurationContext, Class<?> type) {
         boolean isResolvable = false;
-        isResolvable = type.isAnnotationPresent(Component.class) && !scanMap.resolveMap().containsKey(type);
+        isResolvable = type.isAnnotationPresent(Component.class) || scanMap.resolveMap().containsKey(type);
         /*
          * Get the bean definition for the configuration classes
          * Check if the para is either an interface defined as a
@@ -180,10 +182,13 @@ public class DependencyGraphBuilder {
     }
 
     private List<BeanDefinition> topologicalSort(Map<BeanDefinition, Set<BeanDefinition>> classGraph, Map<BeanDefinition, Integer> indegreeMap) {
+        System.out.println("[DI] Topological sort start");
+        System.out.println(classGraph);
         Deque<BeanDefinition> zeroDegreeBeans = indegreeMap.entrySet().stream()
                 .filter(entry -> entry.getValue() == 0)
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toCollection(ArrayDeque::new));
+        System.out.println(zeroDegreeBeans);
 
         List<BeanDefinition> initializationOrder = new java.util.ArrayList<>();
 
@@ -201,6 +206,7 @@ public class DependencyGraphBuilder {
                     .peek(entry -> entry.setValue(entry.getValue() - 1))
                     .filter(entry -> entry.getValue() == 0)
                     .forEach(entry -> zeroDegreeBeans.push(entry.getKey()));
+
         }
 
         if (initializationOrder.size() < classGraph.size()) {
@@ -209,12 +215,14 @@ public class DependencyGraphBuilder {
                     .map(entry -> entry.getKey().getName())
                     .sorted()
                     .collect(Collectors.joining(", "));
+            System.out.println("[DI] Circular dependency detected: " + unresolved);
             throw new CircularDependencyException(
                     "DI error: circular dependency detected among beans: [" + unresolved + "]. " +
                             "Review constructor dependencies to break the cycle."
             );
         }
 
+        System.out.println("[DI] Initialization order size=" + initializationOrder.size());
         return initializationOrder;
     }
 }

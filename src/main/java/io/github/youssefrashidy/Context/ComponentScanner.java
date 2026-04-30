@@ -29,7 +29,7 @@ public class ComponentScanner {
                 if (isConfiguration(cls)) {
                     configurationClasses.add(cls) ;
                 }
-                else if (cls.isAnnotationPresent(Component.class)) {
+                else if (isComponent(cls)) {
                     componentList.add(cls);
                     for (Class<?> abstraction : cls.getInterfaces())
                         resolveMap.computeIfAbsent(abstraction, _ -> new ArrayList<>())
