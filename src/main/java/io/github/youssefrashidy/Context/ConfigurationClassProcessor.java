@@ -2,6 +2,7 @@ package io.github.youssefrashidy.Context;
 
 import io.github.youssefrashidy.annotations.Bean;
 import io.github.youssefrashidy.annotations.ScopeType;
+import io.github.youssefrashidy.Exceptions.DuplicateBeanIdentifierException;
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.bind.annotation.Origin;
@@ -11,10 +12,7 @@ import net.bytebuddy.implementation.bind.annotation.This;
 import net.bytebuddy.matcher.ElementMatchers;
 
 import java.lang.reflect.Method;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
@@ -46,7 +44,21 @@ public class ConfigurationClassProcessor {
                         !method.getAnnotation(Bean.class).value().isEmpty()) ?
                         method.getAnnotation(Bean.class).value() : method.getName()))
                 .collect(Collectors.toList());
+        validateUniqueIdentifiers(definitions);
         return new ConfigurationContext(proxies, definitions);
+    }
+
+    private void validateUniqueIdentifiers(List<MethodBeanDefinition> definitions) {
+        Set<String> identifiers = new HashSet<>();
+        for (MethodBeanDefinition definition : definitions) {
+            String identifier = definition.identifier();
+            if (!identifiers.add(identifier)) {
+                throw new DuplicateBeanIdentifierException(
+                        "DI error: duplicate bean identifier '" + identifier + "' in configuration classes. " +
+                                "Identifiers must be unique."
+                );
+            }
+        }
     }
 
     public static class BeanInterceptor {

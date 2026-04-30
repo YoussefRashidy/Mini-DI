@@ -28,7 +28,7 @@ public class AnnotationConfigApplicationContext implements ApplicationContext {
 		ScanMap scanMap = scanner.scan(config);
 		ConfigurationContext configurationContext = processor.processConfigurationClasses(scanMap.configurationClasses(), beanContainer) ;
 		var initOrder = graphBuilder.buildInitializationOrder(scanMap , configurationContext);
-		beanInstantiator.instantiateBeans(scanMap, initOrder, beanContainer);
+		beanInstantiator.instantiateBeans(scanMap, configurationContext, initOrder, beanContainer);
 	}
 
 	@Override
