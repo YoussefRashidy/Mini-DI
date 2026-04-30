@@ -1,16 +1,10 @@
 package io.github.youssefrashidy.Context;
 
+import io.github.youssefrashidy.Exceptions.BeanMethodDependencyException;
 import io.github.youssefrashidy.Exceptions.UnregisteredDependencyException;
-import io.github.youssefrashidy.annotations.Inject;
-import io.github.youssefrashidy.annotations.Qualifier;
-import io.github.youssefrashidy.annotations.Scope;
-import io.github.youssefrashidy.annotations.ScopeType;
+import io.github.youssefrashidy.annotations.*;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Parameter;
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.Type;
+import java.lang.reflect.*;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -24,20 +18,33 @@ public class BeanInstantiator {
         this.dependencyResolver = dependencyResolver;
     }
 
-    public void instantiateBeans(ScanMap scanMap, List<Class<?>> initOrder, BeanContainer beanContainer) {
-        for (var cls : initOrder) {
-            Constructor<?>[] constructors = cls.getDeclaredConstructors();
-            if (constructors.length == 1 && constructors[0].getParameterCount() == 0) {
-                Constructor<?> constructor = constructors[0];
-                constructor.setAccessible(true);
-                resolveScope(cls, constructor, new Parameter[0], scanMap.resolveMap(), beanContainer);
-            } else {
-                var annotatedConstructor = Arrays.stream(constructors)
-                        .filter(c -> c.isAnnotationPresent(Inject.class))
-                        .toArray(Constructor<?>[]::new)[0];
-                annotatedConstructor.setAccessible(true);
-                resolveScope(cls, annotatedConstructor, annotatedConstructor.getParameters(), scanMap.resolveMap(), beanContainer);
+    public void instantiateBeans(ScanMap scanMap, List<BeanDefinition> initOrder, BeanContainer beanContainer) {
+        for (var beanDefinition : initOrder) {
+            switch (beanDefinition) {
+                case AnnotationBeanDefinition annotationBeanDefinition -> {
+                    Class<?> cls = annotationBeanDefinition.cls();
+                    Constructor<?>[] constructors = cls.getDeclaredConstructors();
+                    if (constructors.length == 1 && constructors[0].getParameterCount() == 0) {
+                        Constructor<?> constructor = constructors[0];
+                        constructor.setAccessible(true);
+                        resolveScope(cls, constructor, new Parameter[0], scanMap.resolveMap(), beanContainer, annotationBeanDefinition);
+                    } else {
+                        var annotatedConstructor = Arrays.stream(constructors)
+                                .filter(c -> c.isAnnotationPresent(Inject.class))
+                                .toArray(Constructor<?>[]::new)[0];
+                        annotatedConstructor.setAccessible(true);
+                        resolveScope(cls, annotatedConstructor, annotatedConstructor.getParameters(), scanMap.resolveMap(), beanContainer, annotationBeanDefinition);
+                    }
+                }
+                case MethodBeanDefinition methodBeanDefinition -> {
+                    Method method = methodBeanDefinition.beanMethod();
+                    Object proxy = methodBeanDefinition.proxy();
+                    String identifier = methodBeanDefinition.identifier();
+                    ScopeType scope = method.getAnnotation(Bean.class).scope();
+                    resolveMethodScope(identifier, method, proxy, method.getParameters(), scanMap.resolveMap(), beanContainer, scope, methodBeanDefinition);
+                }
             }
+
         }
     }
 
@@ -46,7 +53,8 @@ public class BeanInstantiator {
             Constructor<?> constructor,
             Parameter[] params,
             Map<Class<?>, List<Class<?>>> resolveMap,
-            BeanContainer beanContainer
+            BeanContainer beanContainer,
+            BeanDefinition definition
     ) {
         try {
             String identifier = dependencyResolver.resolveIdentifier(cls);
@@ -62,18 +70,64 @@ public class BeanInstantiator {
                         throw new RuntimeException(e);
                     }
                 };
-                beanContainer.registerBean(cls, identifier, supplier);
+                beanContainer.registerBean(definition, supplier);
             } else {
                 ArrayList<Object> beans = new ArrayList<>();
                 for (var param : params) {
                     resolveParameter(param, beans, resolveMap, beanContainer);
                 }
                 Object instance = constructor.newInstance(beans.toArray());
-                beanContainer.registerBean(cls, identifier, () -> instance);
+                beanContainer.registerBean(definition, () -> instance);
             }
         } catch (InvocationTargetException | InstantiationException | IllegalAccessException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private void resolveMethodScope(String identifier,
+                                    Method method,
+                                    Object proxy,
+                                    Parameter[] params,
+                                    Map<Class<?>, List<Class<?>>> resolveMap,
+                                    BeanContainer beanContainer,
+                                    ScopeType scope,
+                                    BeanDefinition definition
+    ) {
+        try {
+            String methodRef = method.getDeclaringClass().getName() + "#" + method.getName();
+            String message = "DI error: configuration bean method '" + methodRef + "' (bean id '" + identifier +
+                    "') could not resolve one or more dependencies.";
+            if (scope == ScopeType.PROTOTYPE) {
+                Supplier<?> supplier = () -> {
+                    try {
+                        ArrayList<Object> beans = new ArrayList<>();
+                        for (var param : params) {
+                            resolveParameter(param, beans, resolveMap, beanContainer);
+                        }
+                        if (beans.contains(null))
+                            throw new BeanMethodDependencyException(message);
+
+                        return method.invoke(proxy, beans.toArray());
+                    } catch (InvocationTargetException | IllegalAccessException e) {
+                        throw new RuntimeException(e);
+                    }
+                };
+                beanContainer.registerBean(definition, supplier);
+            } else {
+                ArrayList<Object> beans = new ArrayList<>();
+                for (var param : params) {
+                    resolveParameter(param, beans, resolveMap, beanContainer);
+                }
+                if (beans.contains(null))
+                    throw new BeanMethodDependencyException(message);
+
+                Object instance = method.invoke(proxy, beans.toArray());
+                beanContainer.registerBean(definition, () -> instance);
+            }
+        } catch (InvocationTargetException | IllegalAccessException e) {
+            throw new RuntimeException(e);
+        }
+
     }
 
     private void resolveParameter(
@@ -124,4 +178,3 @@ public class BeanInstantiator {
         beans.add(resolved);
     }
 }
-

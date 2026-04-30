@@ -2,6 +2,7 @@ package io.github.youssefrashidy.Exceptions;
 
 public class BeanMethodDependencyException extends RuntimeException{
     public BeanMethodDependencyException() {
+        super("DI error: configuration bean method dependency resolution failed.");
     }
 
     public BeanMethodDependencyException(String message) {
