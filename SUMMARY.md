@@ -85,7 +85,7 @@ Injection site resolution is handled by `DependencyResolver`:
 ## Scope handling
 
 **SINGLETON** (default): bean is instantiated once at startup, registered as `() -> instance`.
-**PROTOTYPE**: registered as a `Supplier<T>` that calls the constructor/method on every `get()`. Can only be injected as `Supplier<T>` — injecting a prototype as a direct dependency is rejected with a clear error.
+**PROTOTYPE**: registered as a `Supplier<T>` that calls the constructor/method on every `get()`. Should be injected as `Supplier<T>` — injecting a prototype as a direct dependency is allowed but it will be converted into singelton inside singeltons and other prototypes.
 
 ByteBuddy intercepts `@Bean` method calls on `@Configuration` proxies:
 - SINGLETON → checks container; if present, returns cached instance; else calls `super.call()`
