@@ -23,7 +23,7 @@ public class ExceptionPathsTest {
         CircularDependencyException ex = assertThrows(
                 CircularDependencyException.class,
                 () -> new AnnotationConfigApplicationContext(Set.of(
-                        "io.github.youssefrashidy.Context.fixtures.broken.circular"
+                        "io.github.youssefrashidy.Context.miniProject.fixtures.broken.circular"
                 ))
         );
         String msg = ex.getMessage();
@@ -40,9 +40,9 @@ public class ExceptionPathsTest {
         AmbiguousConstructorException ex = assertThrows(
                 AmbiguousConstructorException.class,
                 () -> new AnnotationConfigApplicationContext(Set.of(
-                        "io.github.youssefrashidy.Context.fixtures.broken.ambiguous",
-                        "io.github.youssefrashidy.Context.fixtures.core",   // AmbiguousBean depends on these
-                        "io.github.youssefrashidy.Context.fixtures.proto"
+                        "io.github.youssefrashidy.Context.miniProject.fixtures.broken.ambiguous",
+                        "io.github.youssefrashidy.Context.miniProject.fixtures.core",   // AmbiguousBean depends on these
+                        "io.github.youssefrashidy.Context.miniProject.fixtures.proto"
                 ))
         );
         assertTrue(ex.getMessage().contains("AmbiguousBean") ||
@@ -57,7 +57,7 @@ public class ExceptionPathsTest {
         UnregisteredDependencyException ex = assertThrows(
                 UnregisteredDependencyException.class,
                 () -> new AnnotationConfigApplicationContext(Set.of(
-                        "io.github.youssefrashidy.Context.fixtures.broken.primitive"
+                        "io.github.youssefrashidy.Context.miniProject.fixtures.broken.primitive"
                 ))
         );
         assertTrue(ex.getMessage().contains("int") || ex.getMessage().contains("primitive"),
@@ -72,9 +72,9 @@ public class ExceptionPathsTest {
         UnregisteredDependencyException ex = assertThrows(
                 UnregisteredDependencyException.class,
                 () -> new AnnotationConfigApplicationContext(Set.of(
-                        "io.github.youssefrashidy.Context.fixtures.broken.supplier",
-                        "io.github.youssefrashidy.Context.fixtures.core",   // PricingEngine lives here
-                        "io.github.youssefrashidy.Context.fixtures.proto"
+                        "io.github.youssefrashidy.Context.miniProject.fixtures.broken.supplier",
+                        "io.github.youssefrashidy.Context.miniProject.fixtures.core",   // PricingEngine lives here
+                        "io.github.youssefrashidy.Context.miniProject.fixtures.proto"
                 ))
         );
         assertTrue(ex.getMessage().contains("non-prototype") || ex.getMessage().contains("PROTOTYPE"),
@@ -87,8 +87,8 @@ public class ExceptionPathsTest {
     @DisplayName("getInstance(String) with unknown id throws UnregisteredDependencyException")
     void unknownIdentifierAtRuntimeThrows() {
         AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext(Set.of(
-                "io.github.youssefrashidy.Context.fixtures.core",
-                "io.github.youssefrashidy.Context.fixtures.proto"
+                "io.github.youssefrashidy.Context.miniProject.fixtures.core",
+                "io.github.youssefrashidy.Context.miniProject.fixtures.proto"
         ));
         UnregisteredDependencyException ex = assertThrows(
                 UnregisteredDependencyException.class,
@@ -104,8 +104,8 @@ public class ExceptionPathsTest {
     @DisplayName("getInstance(String, Class) with mismatched type throws UnregisteredDependencyException")
     void typeMismatchThrows() {
         AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext(Set.of(
-                "io.github.youssefrashidy.Context.fixtures.core",
-                "io.github.youssefrashidy.Context.fixtures.proto"
+                "io.github.youssefrashidy.Context.miniProject.fixtures.core",
+                "io.github.youssefrashidy.Context.miniProject.fixtures.proto"
         ));
         assertThrows(
                 UnregisteredDependencyException.class,
