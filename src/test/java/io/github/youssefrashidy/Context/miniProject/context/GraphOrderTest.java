@@ -25,13 +25,10 @@ public class GraphOrderTest {
 
     @BeforeAll
     static void boot() {
-        // If Kahn's sort is wrong this throws before any test runs
-        assertDoesNotThrow(() ->
-                ctx = new AnnotationConfigApplicationContext(Set.of(
-                        "io.github.youssefrashidy.Context.fixtures.core",
-                        "io.github.youssefrashidy.Context.fixtures.proto"
-                ))
-        );
+        ctx = new AnnotationConfigApplicationContext(Set.of(
+                "io.github.youssefrashidy.Context.miniProject.fixtures.core",
+                "io.github.youssefrashidy.Context.miniProject.fixtures.proto"
+        ));
     }
 
     @Test

@@ -26,8 +26,8 @@ class ContainerLookupTest {
     @BeforeAll
     static void boot() {
         ctx = new AnnotationConfigApplicationContext(Set.of(
-                "io.github.youssefrashidy.Context.fixtures.core",
-                "io.github.youssefrashidy.Context.fixtures.proto"
+                "io.github.youssefrashidy.Context.miniProject.fixtures.core",
+                "io.github.youssefrashidy.Context.miniProject.fixtures.proto"
         ));
     }
 
