@@ -3,7 +3,6 @@ package io.github.youssefrashidy.Context;
 import io.github.youssefrashidy.Exceptions.AmbiguousConstructorException;
 import io.github.youssefrashidy.Exceptions.CircularDependencyException;
 import io.github.youssefrashidy.Exceptions.UnregisteredDependencyException;
-import io.github.youssefrashidy.annotations.Component;
 import io.github.youssefrashidy.annotations.Inject;
 
 import java.lang.reflect.Constructor;
@@ -47,14 +46,19 @@ public class DependencyGraphBuilder {
     }
 
     private void buildMaps(ScanMap scanMap, ConfigurationContext configurationContext, Map<BeanDefinition, Set<BeanDefinition>> classGraph, Map<BeanDefinition, Integer> indegreeMap) {
-        System.out.println("[DI] Scanning components=" + scanMap.componentList().size() + ", configBeans=" + configurationContext.beanDefinitions().size());
-        for (var cls : scanMap.componentList()) {
+        System.out.println("[DI] Scanning components=" + scanMap.components().size() + ", configBeans=" + configurationContext.beanDefinitions().size());
+        for (var componentDefinition : scanMap.components()) {
+            DependencyBeanDefinition dependencyDefinition = new DependencyBeanDefinition(
+                    componentDefinition.cls(),
+                    componentDefinition.scope(),
+                    componentDefinition.identifier()
+            );
+            Class<?> cls = dependencyDefinition.cls();
             System.out.println("[DI] Analyze component=" + cls.getName());
-            AnnotationBeanDefinition annotationDefinition = dependencyResolver.resolveAnnotationBeanDefinition(cls);
             Constructor<?>[] constructors = cls.getDeclaredConstructors();
             if (constructors.length == 1 && constructors[0].getParameterCount() == 0) {
-                classGraph.put(annotationDefinition, Collections.emptySet());
-                indegreeMap.put(annotationDefinition, 0);
+                classGraph.put(dependencyDefinition, Collections.emptySet());
+                indegreeMap.put(dependencyDefinition, 0);
                 continue;
             }
 
@@ -85,26 +89,31 @@ public class DependencyGraphBuilder {
                 if (UNRESOLVABLE.contains(type)) {
                     throw new UnregisteredDependencyException(
                             "DI error: cannot inject parameter '" + param.getName() + "' of type '" + type.getName() +
-                                    "' in bean '" + annotationDefinition.identifier() + "' because primitive/value types are not supported. " +
+                                    "' in bean '" + dependencyDefinition.identifier() + "' because primitive/value types are not supported. " +
                                     "Use a dedicated configuration bean instead."
                     );
                 }
 
                 // add method to check for both components and beans methods
                 if (!isResolvable(scanMap, configurationContext, type)) {
-                    System.out.println("[DI] Missing dependency type=" + type.getName() + " for bean=" + annotationDefinition.identifier());
+                    System.out.println("[DI] Missing dependency type=" + type.getName() + " for bean=" + dependencyDefinition.identifier());
                     throw new UnregisteredDependencyException(
                             "DI error: missing bean for parameter '" + param.getName() + "' of type '" + type.getName() +
-                                    "' required by bean '" + annotationDefinition.identifier() + "'."
+                                    "' required by bean '" + dependencyDefinition.identifier() + "'."
                     );
                 }
 
-                var candidateClass = dependencyResolver.resolveParamType(param, scanMap.resolveMap(), configurationContext);
-                AnnotationBeanDefinition candidateDefinition = dependencyResolver.resolveAnnotationBeanDefinition(candidateClass, configurationContext, param);
+                var candidateClass = dependencyResolver.resolveParamType(param, scanMap, configurationContext);
+                var candidateIdentifier = dependencyResolver.resolveParamIdentifier(param, candidateClass, scanMap, configurationContext);
+                BeanDefinition candidateDefinition = configurationContext.beanDefinitions().stream()
+                        .filter(definition -> definition.identifier().equals(candidateIdentifier))
+                        .map(definition -> (BeanDefinition) definition)
+                        .findFirst()
+                        .orElseGet(() -> dependencyResolver.resolveDependencyBeanDefinition(candidateClass, scanMap, configurationContext, param));
                 System.out.println("[DI] Resolved dependency " + type.getName() + " -> " + candidateClass.getName());
-                classGraph.computeIfAbsent(annotationDefinition, _ -> new HashSet<>()).add(candidateDefinition);
+                classGraph.computeIfAbsent(dependencyDefinition, _ -> new HashSet<>()).add(candidateDefinition);
             }
-            indegreeMap.put(annotationDefinition, classGraph.get(annotationDefinition).size());
+            indegreeMap.put(dependencyDefinition, classGraph.get(dependencyDefinition).size());
         }
         for (var beanDefinition : configurationContext.beanDefinitions()) {
             System.out.println("[DI] Analyze config bean=" + beanDefinition.identifier());
@@ -148,8 +157,13 @@ public class DependencyGraphBuilder {
                     );
                 }
 
-                var candidateClass = dependencyResolver.resolveParamType(param, scanMap.resolveMap(), configurationContext);
-                AnnotationBeanDefinition candidateDefinition = dependencyResolver.resolveAnnotationBeanDefinition(candidateClass, configurationContext,param);
+                var candidateClass = dependencyResolver.resolveParamType(param, scanMap, configurationContext);
+                var candidateIdentifier = dependencyResolver.resolveParamIdentifier(param, candidateClass, scanMap, configurationContext);
+                BeanDefinition candidateDefinition = configurationContext.beanDefinitions().stream()
+                        .filter(definition -> definition.identifier().equals(candidateIdentifier))
+                        .map(definition -> (BeanDefinition) definition)
+                        .findFirst()
+                        .orElseGet(() -> dependencyResolver.resolveDependencyBeanDefinition(candidateClass, scanMap, configurationContext, param));
                 System.out.println("[DI] Resolved dependency " + type.getName() + " -> " + candidateClass.getName());
                 classGraph.computeIfAbsent(beanDefinition, _ -> new HashSet<>()).add(candidateDefinition);
             }
@@ -159,7 +173,8 @@ public class DependencyGraphBuilder {
 
     private static boolean isResolvable(ScanMap scanMap, ConfigurationContext configurationContext, Class<?> type) {
         boolean isResolvable = false;
-        isResolvable = type.isAnnotationPresent(Component.class) || scanMap.resolveMap().containsKey(type);
+        isResolvable = scanMap.components().stream().anyMatch(definition -> definition.cls().equals(type))
+                || scanMap.resolveMap().containsKey(type);
         /*
          * Get the bean definition for the configuration classes
          * Check if the para is either an interface defined as a
