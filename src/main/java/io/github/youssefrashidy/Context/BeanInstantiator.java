@@ -29,7 +29,7 @@ public class BeanInstantiator {
             switch (definition) {
                 case ComponentBeanDefinition componentBeanDefinition -> instantiateComponentBean(componentBeanDefinition, ctx);
                 case MethodBeanDefinition methodBeanDefinition    -> instantiateMethodBean(methodBeanDefinition, ctx);
-                default -> throw new RuntimeException() ;
+                default -> throw new RuntimeException() ; // shouldn't be instantiated
             }
         }
     }

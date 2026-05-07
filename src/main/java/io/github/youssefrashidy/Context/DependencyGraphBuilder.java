@@ -48,17 +48,12 @@ public class DependencyGraphBuilder {
     private void buildMaps(ScanMap scanMap, ConfigurationContext configurationContext, Map<BeanDefinition, Set<BeanDefinition>> classGraph, Map<BeanDefinition, Integer> indegreeMap) {
         System.out.println("[DI] Scanning components=" + scanMap.components().size() + ", configBeans=" + configurationContext.beanDefinitions().size());
         for (var componentDefinition : scanMap.components()) {
-            DependencyBeanDefinition dependencyDefinition = new DependencyBeanDefinition(
-                    componentDefinition.cls(),
-                    componentDefinition.scope(),
-                    componentDefinition.identifier()
-            );
-            Class<?> cls = dependencyDefinition.cls();
+            Class<?> cls = componentDefinition.cls();
             System.out.println("[DI] Analyze component=" + cls.getName());
             Constructor<?>[] constructors = cls.getDeclaredConstructors();
             if (constructors.length == 1 && constructors[0].getParameterCount() == 0) {
-                classGraph.put(dependencyDefinition, Collections.emptySet());
-                indegreeMap.put(dependencyDefinition, 0);
+                classGraph.put(componentDefinition, Collections.emptySet());
+                indegreeMap.put(componentDefinition, 0);
                 continue;
             }
 
@@ -89,17 +84,17 @@ public class DependencyGraphBuilder {
                 if (UNRESOLVABLE.contains(type)) {
                     throw new UnregisteredDependencyException(
                             "DI error: cannot inject parameter '" + param.getName() + "' of type '" + type.getName() +
-                                    "' in bean '" + dependencyDefinition.identifier() + "' because primitive/value types are not supported. " +
+                                    "' in bean '" + componentDefinition.identifier() + "' because primitive/value types are not supported. " +
                                     "Use a dedicated configuration bean instead."
                     );
                 }
 
                 // add method to check for both components and beans methods
                 if (!isResolvable(scanMap, configurationContext, type)) {
-                    System.out.println("[DI] Missing dependency type=" + type.getName() + " for bean=" + dependencyDefinition.identifier());
+                    System.out.println("[DI] Missing dependency type=" + type.getName() + " for bean=" + componentDefinition.identifier());
                     throw new UnregisteredDependencyException(
                             "DI error: missing bean for parameter '" + param.getName() + "' of type '" + type.getName() +
-                                    "' required by bean '" + dependencyDefinition.identifier() + "'."
+                                    "' required by bean '" + componentDefinition.identifier() + "'."
                     );
                 }
 
@@ -111,9 +106,9 @@ public class DependencyGraphBuilder {
                         .findFirst()
                         .orElseGet(() -> dependencyResolver.resolveDependencyBeanDefinition(candidateClass, scanMap, configurationContext, param));
                 System.out.println("[DI] Resolved dependency " + type.getName() + " -> " + candidateClass.getName());
-                classGraph.computeIfAbsent(dependencyDefinition, _ -> new HashSet<>()).add(candidateDefinition);
+                classGraph.computeIfAbsent(componentDefinition, _ -> new HashSet<>()).add(candidateDefinition);
             }
-            indegreeMap.put(dependencyDefinition, classGraph.get(dependencyDefinition).size());
+            indegreeMap.put(componentDefinition, classGraph.get(componentDefinition).size());
         }
         for (var beanDefinition : configurationContext.beanDefinitions()) {
             System.out.println("[DI] Analyze config bean=" + beanDefinition.identifier());
