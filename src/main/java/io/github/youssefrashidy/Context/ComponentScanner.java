@@ -5,6 +5,7 @@ import io.github.classgraph.ClassInfo;
 import io.github.classgraph.ScanResult;
 import io.github.youssefrashidy.annotations.Component;
 import io.github.youssefrashidy.annotations.Configuration;
+import io.github.youssefrashidy.annotations.ScopeType;
 
 import java.util.*;
 
@@ -15,9 +16,10 @@ public class ComponentScanner {
     }
 
     private ScanMap resolvePackages(Set<String> basePackages) {
-        final Map<Class<?>, List<Class<?>>> resolveMap = new HashMap<>();
-        final List<Class<?>> componentList = new ArrayList<>();
+        final Map<Class<?>, List<ComponentBeanDefinition>> resolveMap = new HashMap<>();
+        final List<ComponentBeanDefinition> components = new ArrayList<>();
         final List<Class<?>> configurationClasses = new ArrayList<>() ;
+        DependencyResolver resolver = new DependencyResolver();
 
         try (ScanResult scanResult = new ClassGraph()
                 .enableClassInfo()
@@ -30,15 +32,30 @@ public class ComponentScanner {
                     configurationClasses.add(cls) ;
                 }
                 else if (isComponent(cls)) {
-                    componentList.add(cls);
+                    String identifier = resolver.resolveIdentifier(cls);
+                    var definition = new ComponentBeanDefinition(cls, resolveScope(cls), identifier);
+                    components.add(definition);
                     for (Class<?> abstraction : cls.getInterfaces())
                         resolveMap.computeIfAbsent(abstraction, _ -> new ArrayList<>())
-                                .add(cls);
+                                .add(definition);
                 }
 
             }
         }
-        return new ScanMap(resolveMap, componentList , configurationClasses);
+        return new ScanMap(resolveMap, components , configurationClasses);
+    }
+
+    private ScopeType resolveScope(Class<?> cls) {
+        if (cls.isAnnotationPresent(io.github.youssefrashidy.annotations.Scope.class)) {
+            return cls.getAnnotation(io.github.youssefrashidy.annotations.Scope.class).value();
+        }
+        for (var annotation : cls.getAnnotations()) {
+            var type = annotation.annotationType();
+            if (type.isAnnotationPresent(io.github.youssefrashidy.annotations.Scope.class)) {
+                return type.getAnnotation(io.github.youssefrashidy.annotations.Scope.class).value();
+            }
+        }
+        return io.github.youssefrashidy.annotations.ScopeType.SINGELTON;
     }
 
     boolean isComponent(Class<?> cls) {

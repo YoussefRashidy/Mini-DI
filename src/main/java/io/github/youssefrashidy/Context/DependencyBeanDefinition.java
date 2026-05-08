@@ -2,7 +2,7 @@ package io.github.youssefrashidy.Context;
 
 import io.github.youssefrashidy.annotations.ScopeType;
 
-public record ComponentBeanDefinition(Class<?> cls , ScopeType scope , String identifier) implements BeanDefinition {
+public record DependencyBeanDefinition(Class<?> cls , ScopeType scope , String identifier) implements BeanDefinition {
     @Override
     public String getName() {
         return identifier;

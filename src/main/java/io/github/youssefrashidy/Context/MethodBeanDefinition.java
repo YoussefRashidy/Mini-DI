@@ -1,8 +1,10 @@
 package io.github.youssefrashidy.Context;
 
+import io.github.youssefrashidy.annotations.ScopeType;
+
 import java.lang.reflect.Method;
 
-public record MethodBeanDefinition(Class<?> cls , Method beanMethod,Object proxy ,String identifier) implements BeanDefinition {
+public record MethodBeanDefinition(Class<?> cls , Method beanMethod, Object proxy , String identifier, ScopeType scope) implements BeanDefinition {
 	@Override
 	public String getName() {
 		return identifier;
