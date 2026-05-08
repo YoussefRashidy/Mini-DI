@@ -21,13 +21,10 @@ public class DependencyResolver {
                 : cls.getSimpleName();
     }
 
-    public String resolveIdentifier(Class<?> cls, ConfigurationContext configurationContext, Parameter parameter) {
-        return resolveIdentifier(cls, configurationContext, parameter, null);
-    }
-
+    @Deprecated
     private String resolveIdentifier(Class<?> cls, ConfigurationContext ctx, Parameter param, ScanMap scanMap) {
         var methodCandidates = ctx.beanDefinitions().stream()
-                .filter(def -> def.cls().equals(cls))
+                .filter(def -> cls.isAssignableFrom(def.cls()))
                 .filter(def -> !param.isAnnotationPresent(Qualifier.class)
                         || param.getAnnotation(Qualifier.class).value().equals(def.identifier()))
                 .toList();
@@ -64,32 +61,45 @@ public class DependencyResolver {
     public Class<?> resolveParamType(Parameter param, ScanMap scanMap, ConfigurationContext configurationContext) {
         var type = param.getType();
 
-        if (type == Supplier.class) {
-            Type generic = param.getParameterizedType();
-
-            if (!(generic instanceof ParameterizedType)) {
-                throw new UnregisteredDependencyException(
-                        "DI error: Supplier parameter '" + param.getName() + "' must have a type argument e.g. Supplier<Foo>."
-                );
-            }
-
-            type = (Class<?>) ((ParameterizedType) generic).getActualTypeArguments()[0];
-            type = resolveConcreteOrInterface(param, type, scanMap, configurationContext);
-            Class<?> resolvedType = type;
-            ComponentBeanDefinition definition = scanMap.components().stream()
-                    .filter(component -> component.cls().equals(resolvedType))
-                    .findFirst()
-                    .orElse(null);
-            if (definition == null || definition.scope() != ScopeType.PROTOTYPE) {
-                throw new UnregisteredDependencyException(
-                        "DI error: Supplier<" + type.getSimpleName() + "> wraps a non-prototype bean. " +
-                                "Only prototype beans may be injected as Supplier."
-                );
-            }
+        if (type != Supplier.class) {
+            return type; // concrete, interface, abstract — all handled uniformly downstream
         }
-        return resolveConcreteOrInterface(param, type, scanMap, configurationContext);
+
+        // Unwrap Supplier<T>
+        Type generic = param.getParameterizedType();
+        if (!(generic instanceof ParameterizedType)) {
+            throw new UnregisteredDependencyException(
+                    "DI error: Supplier parameter '" + param.getName() +
+                            "' must have a type argument e.g. Supplier<Foo>."
+            );
+        }
+
+        Class<?> inner = (Class<?>) ((ParameterizedType) generic).getActualTypeArguments()[0];
+
+        // Validate that the inner type resolves at least one prototype
+        List<BeanDefinition> candidates = new ArrayList<>();
+
+        scanMap.components().stream()
+                .filter(d -> inner.isAssignableFrom(d.cls()))
+                .forEach(candidates::add);
+
+        configurationContext.beanDefinitions().stream()
+                .filter(d -> inner.isAssignableFrom(d.cls()))
+                .forEach(candidates::add);
+
+        boolean hasPrototype = candidates.stream().anyMatch(d -> d.scope() == ScopeType.PROTOTYPE);
+
+        if (candidates.isEmpty() || !hasPrototype) {
+            throw new UnregisteredDependencyException(
+                    "DI error: Supplier<" + inner.getSimpleName() + "> wraps a non-prototype bean. " +
+                            "Only prototype beans may be injected as Supplier."
+            );
+        }
+
+        return inner; // caller will wrap the instantiation in a Supplier
     }
 
+    @Deprecated
     private Class<?> resolveConcreteOrInterface(Parameter param, Class<?> type, ScanMap scanMap, ConfigurationContext configurationContext) {
         if (!type.isInterface()) {
             return type;
@@ -149,113 +159,70 @@ public class DependencyResolver {
         return !componentCandidates.isEmpty() ? componentCandidates.getFirst().cls() : methodCandidates.getFirst().cls();
     }
 
-    public String resolveParamIdentifier(Parameter param, Class<?> type, ScanMap scanMap, ConfigurationContext configurationContext) {
-        if (!type.isInterface()) {
-            return resolveIdentifier(type, configurationContext, param, scanMap);
-        }
-        var classes = scanMap.resolveMap().get(type);
-        List<ComponentBeanDefinition> componentCandidates = classes == null ? List.of() : classes;
-        List<MethodBeanDefinition> methodCandidates = configurationContext.beanDefinitions().stream()
-                .filter(definition -> type.isAssignableFrom(definition.cls()))
-                .toList();
-
-        if (param.isAnnotationPresent(Qualifier.class)) {
-            String val = param.getAnnotation(Qualifier.class).value();
-            var qualifiedComponents = componentCandidates.stream()
-                    .filter(definition -> definition.identifier().equals(val))
-                    .toList();
-            var qualifiedMethods = methodCandidates.stream()
-                    .filter(definition -> definition.identifier().equals(val))
-                    .toList();
-            int total = qualifiedComponents.size() + qualifiedMethods.size();
-            if (total > 1) {
-                String candidates = qualifiedComponents.stream().map(definition -> definition.cls().getName())
-                        .collect(Collectors.joining(", "));
-                String methodNames = qualifiedMethods.stream().map(definition -> definition.cls().getName())
-                        .collect(Collectors.joining(", "));
-                String joined = String.join(", ", candidates, methodNames).replaceAll("^, |, $", "");
-                throw new AmbiguousBeanException(
-                        "DI error: multiple beans match qualifier '" + val + "' for interface '" + type.getName() +
-                                "' on parameter '" + param.getName() + "': [" + joined + "]."
-                );
-            }
-            if (total == 0) {
-                throw new AmbiguousBeanException(
-                        "DI error: no bean matches qualifier '" + val + "' for interface '" + type.getName() +
-                                "' on parameter '" + param.getName() + "'."
-                );
-            }
-            return !qualifiedComponents.isEmpty() ? val : qualifiedMethods.getFirst().identifier();
-        }
-
-        int totalCandidates = componentCandidates.size() + methodCandidates.size();
-        if (totalCandidates == 0) {
-            throw new UnregisteredDependencyException(
-                    "DI error: no bean implementation registered for interface '" + param.getType().getName() +
-                            "' required by parameter '" + param.getName() + "'."
-            );
-        }
-        if (totalCandidates > 1) {
-            String candidates = componentCandidates.stream().map(definition -> definition.cls().getName()).sorted().collect(Collectors.joining(", "));
-            String methodNames = methodCandidates.stream().map(definition -> definition.cls().getName()).sorted().collect(Collectors.joining(", "));
-            String joined = String.join(", ", candidates, methodNames).replaceAll("^, |, $", "");
-            throw new AmbiguousBeanException(
-                    "DI error: multiple beans found for interface '" + type.getName() + "' on parameter '" +
-                            param.getName() + "': [" + joined + "]. Add @Qualifier to disambiguate."
-            );
-        }
-
-        return !componentCandidates.isEmpty()
-                ? resolveIdentifier(componentCandidates.getFirst().cls(), configurationContext, param, scanMap)
-                : methodCandidates.getFirst().identifier();
+    public String resolveParamIdentifier(Parameter param, Class<?> paramType,
+                                         ScanMap scanMap, ConfigurationContext ctx) {
+        // resolveDependencyBeanDefinition already does the full isAssignableFrom search
+        // with qualifier filtering and ambiguity checks — just reuse it.
+        return resolveDependencyBeanDefinition(paramType, scanMap, ctx, param).identifier();
     }
 
-    public DependencyBeanDefinition resolveDependencyBeanDefinition(Class<?> cls, ScanMap scanMap,
-                                                                    ConfigurationContext ctx, Parameter param) {
+    public DependencyBeanDefinition resolveDependencyBeanDefinition(
+            Class<?> paramType,        // raw declared type (Vehicle, Greeter, DataSource, ...)
+            ScanMap scanMap,
+            ConfigurationContext ctx,
+            Parameter param) {
+
+        // 1. Collect every bean whose concrete type is assignable to the declared parameter type.
         List<BeanDefinition> candidates = new ArrayList<>();
 
         scanMap.components().stream()
-                .filter(d -> d.cls().equals(cls))
+                .filter(d -> paramType.isAssignableFrom(d.cls()))
                 .forEach(candidates::add);
-
         ctx.beanDefinitions().stream()
-                .filter(d -> d.cls().equals(cls))
+                .filter(d -> paramType.isAssignableFrom(d.cls()))
                 .forEach(candidates::add);
+        // 2. Apply @Qualifier filter if present.
+        if (param.isAnnotationPresent(Qualifier.class)) {
+            String val = param.getAnnotation(Qualifier.class).value();
+            candidates = candidates.stream()
+                    .filter(d -> d.identifier().equals(val))
+                    .collect(Collectors.toCollection(ArrayList::new));
 
+            if (candidates.isEmpty())
+                throw new AmbiguousBeanException(
+                        "DI error: no bean matches qualifier '" + val +
+                                "' for type '" + paramType.getName() +
+                                "' on parameter '" + param.getName() + "'."
+                );
+            if (candidates.size() > 1)
+                throw new AmbiguousBeanException(
+                        "DI error: multiple beans match qualifier '" + val +
+                                "' for type '" + paramType.getName() +
+                                "' on parameter '" + param.getName() + "'."
+                );
+        }
+
+        // 3. No bean matches
         if (candidates.isEmpty())
             throw new UnregisteredDependencyException(
-                    "DI error: no bean registered for class '" + cls.getName() +
+                    "DI error: no bean registered assignable to '" + paramType.getName() +
                             "' required by parameter '" + param.getName() + "'."
             );
 
+        // 4. Ambiguity .
         if (candidates.size() > 1) {
-            if (param.isAnnotationPresent(Qualifier.class)) {
-                String val = param.getAnnotation(Qualifier.class).value();
-                candidates = candidates.stream()
-                        .filter(d -> d.identifier().equals(val))
-                        .toList();
-                if (candidates.isEmpty())
-                    throw new AmbiguousBeanException(
-                            "DI error: no bean matches qualifier '" + val +
-                                    "' for class '" + cls.getName() + "' on parameter '" + param.getName() + "'."
-                    );
-                if (candidates.size() > 1)
-                    throw new AmbiguousBeanException(
-                            "DI error: multiple beans match qualifier '" + val +
-                                    "' for class '" + cls.getName() + "' on parameter '" + param.getName() + "'."
-                    );
-            } else {
-                throw new AmbiguousBeanException(
-                        "DI error: multiple beans registered for class '" + cls.getName() +
-                                "' on parameter '" + param.getName() + "'. Add @Qualifier to disambiguate."
-                );
-            }
+            String names = candidates.stream()
+                    .map(d -> d.cls().getName())
+                    .sorted()
+                    .collect(Collectors.joining(", "));
+            throw new AmbiguousBeanException(
+                    "DI error: multiple beans assignable to '" + paramType.getName() +
+                            "' on parameter '" + param.getName() + "': [" + names +
+                            "]. Add @Qualifier to disambiguate."
+            );
         }
 
-        // recheck this method
-
         BeanDefinition resolved = candidates.getFirst();
-        resolveIdentifier(resolved.cls(), ctx, param, scanMap); // global name conflict check
-        return new DependencyBeanDefinition(resolved.cls(), null,resolved.identifier());
+        return new DependencyBeanDefinition(resolved.cls(), null, resolved.identifier());
     }
 }

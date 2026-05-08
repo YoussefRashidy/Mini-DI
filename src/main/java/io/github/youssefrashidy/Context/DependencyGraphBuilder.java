@@ -168,7 +168,7 @@ public class DependencyGraphBuilder {
 
     private static boolean isResolvable(ScanMap scanMap, ConfigurationContext configurationContext, Class<?> type) {
         boolean isResolvable = false;
-        isResolvable = scanMap.components().stream().anyMatch(definition -> definition.cls().equals(type))
+        isResolvable = scanMap.components().stream().anyMatch(definition -> type.isAssignableFrom(definition.cls()))
                 || scanMap.resolveMap().containsKey(type);
         /*
          * Get the bean definition for the configuration classes
