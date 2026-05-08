@@ -19,19 +19,19 @@ class Group12PrimitiveWrapperBeanTests {
     }
 
     @Configuration
-    static class PrimitiveConfig {
+    public static class PrimitiveConfig {
         @Bean("timeout")
-        Long timeout() {
+        public Long timeout() {
             return 5000L;
         }
 
         @Bean("featureFlag")
-        Boolean featureFlag() {
+        public Boolean featureFlag() {
             return true;
         }
 
         @Bean("threshold")
-        Double threshold() {
+        public Double threshold() {
             return 0.95;
         }
     }

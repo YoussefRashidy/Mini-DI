@@ -22,7 +22,7 @@ class Group9SubtypeBeanTests {
         abstract int size();
     }
 
-    static class InMemoryCache extends Cache {
+    public static class InMemoryCache extends Cache {
         @Override
         int size() {
             return 100;
@@ -30,9 +30,9 @@ class Group9SubtypeBeanTests {
     }
 
     @Configuration
-    static class CacheConfig {
+    public static class CacheConfig {
         @Bean("cache")
-        InMemoryCache cache() {
+        public InMemoryCache cache() {
             return new InMemoryCache();
         }
     }

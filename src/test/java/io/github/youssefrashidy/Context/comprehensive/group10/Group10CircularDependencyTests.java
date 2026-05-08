@@ -34,12 +34,5 @@ class Group10CircularDependencyTests {
         assertThrows(CircularDependencyException.class, () -> new AnnotationConfigApplicationContext(Group10CircularDependencyTests.class));
     }
 
-    @Test
-    @Disabled("The current container fails during initialization, so there is no recoverable context instance to verify.")
-    @DisplayName("X10_T2 — unrelated beans remain resolvable after a circular failure")
-    void unrelatedBeansRemainResolvableAfterCircularFailure() {
-        ApplicationContext ctx = new AnnotationConfigApplicationContext(Group10CircularDependencyTests.class);
-        assertNotNull(ctx);
-    }
 }
 

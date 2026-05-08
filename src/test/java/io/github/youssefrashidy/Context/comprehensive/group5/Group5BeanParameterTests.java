@@ -10,13 +10,13 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Group 5 — @Bean methods taking @Component parameters")
-class Group5BeanParameterTests {
+public class Group5BeanParameterTests {
 
     private ApplicationContext newContext() {
         return new AnnotationConfigApplicationContext(Group5BeanParameterTests.class);
     }
 
-    static class ConnectionPool {
+    public static class ConnectionPool {
         final int size;
         final int identity = System.identityHashCode(this);
 
@@ -26,14 +26,14 @@ class Group5BeanParameterTests {
     }
 
     @Configuration
-    static class AppConfig {
+    public static class AppConfig {
         @Bean("connectionPool")
-        ConnectionPool connectionPool() {
+        public ConnectionPool connectionPool() {
             return new ConnectionPool(5);
         }
 
         @Bean("connectionStats")
-        String connectionStats(ConnectionPool pool) {
+        public String connectionStats(ConnectionPool pool) {
             return "pool-size=" + pool.size + ";pool-id=" + pool.identity;
         }
     }

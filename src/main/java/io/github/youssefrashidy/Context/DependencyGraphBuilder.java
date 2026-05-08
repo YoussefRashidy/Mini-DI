@@ -24,12 +24,17 @@ import java.util.stream.Collectors;
 public class DependencyGraphBuilder {
     private final DependencyResolver dependencyResolver;
 
+    //    private static final Set<Class<?>> UNRESOLVABLE = Set.of(
+//            byte.class, short.class, int.class, long.class,
+//            float.class, double.class, boolean.class, char.class,
+//            Byte.class, Short.class, Integer.class, Long.class,
+//            Float.class, Double.class, Boolean.class, Character.class,
+//            String.class
+//    );
+    // removed boxed values now they can be injected
     private static final Set<Class<?>> UNRESOLVABLE = Set.of(
             byte.class, short.class, int.class, long.class,
-            float.class, double.class, boolean.class, char.class,
-            Byte.class, Short.class, Integer.class, Long.class,
-            Float.class, Double.class, Boolean.class, Character.class,
-            String.class
+            float.class, double.class, boolean.class, char.class
     );
 
     public DependencyGraphBuilder(DependencyResolver dependencyResolver) {

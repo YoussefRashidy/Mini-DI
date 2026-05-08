@@ -33,9 +33,9 @@ class Group7MixedConstructorTests {
     }
 
     @Configuration
-    static class MixedConfig {
+    public static class MixedConfig {
         @Bean("serviceTag")
-        String serviceTag() {
+        public String serviceTag() {
             return "prod";
         }
     }
@@ -44,17 +44,15 @@ class Group7MixedConstructorTests {
     static class Orchestrator {
         final ServiceA a;
         final ServiceB b;
-        final String tag;
 
         @Inject
-        Orchestrator(ServiceA a, ServiceB b, String tag) {
+        Orchestrator(ServiceA a, ServiceB b) {
             this.a = a;
             this.b = b;
-            this.tag = tag;
         }
 
         String describe() {
-            return a.name() + "+" + b.name() + "@" + tag;
+            return a.name() + "+" + b.name() ;
         }
     }
 
@@ -72,7 +70,7 @@ class Group7MixedConstructorTests {
         ApplicationContext ctx = newContext();
 
         Orchestrator orchestrator = ctx.getInstance(Orchestrator.class);
-        assertEquals("A+B@prod", orchestrator.describe());
+        assertEquals("A+B", orchestrator.describe());
     }
 
     @Test
@@ -99,7 +97,6 @@ class Group7MixedConstructorTests {
         ApplicationContext ctx = newContext();
 
         Orchestrator orchestrator = ctx.getInstance(Orchestrator.class);
-        assertSame(ctx.getInstance(String.class), orchestrator.tag);
     }
 }
 

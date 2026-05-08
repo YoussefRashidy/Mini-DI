@@ -18,7 +18,7 @@ class Group6ComponentDependsOnBeanTests {
         return new AnnotationConfigApplicationContext(Group6ComponentDependsOnBeanTests.class);
     }
 
-    static class DataSource {
+    public static class DataSource {
         final String url;
         final int identity = System.identityHashCode(this);
 
@@ -28,9 +28,9 @@ class Group6ComponentDependsOnBeanTests {
     }
 
     @Configuration
-    static class InfraConfig {
+    public static class InfraConfig {
         @Bean("dataSource")
-        DataSource dataSource() {
+        public DataSource dataSource() {
             return new DataSource("jdbc:h2:mem:test");
         }
     }

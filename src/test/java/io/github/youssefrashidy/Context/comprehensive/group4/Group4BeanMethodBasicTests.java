@@ -10,21 +10,21 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Group 4 — basic @Bean method cases")
-class Group4BeanMethodBasicTests {
+public class Group4BeanMethodBasicTests {
 
     private ApplicationContext newContext() {
         return new AnnotationConfigApplicationContext(Group4BeanMethodBasicTests.class);
     }
 
     @Configuration
-    static class AppConfig {
+    public static class AppConfig {
         @Bean("databaseUrl")
-        String databaseUrl() {
+        public String databaseUrl() {
             return "jdbc:postgresql://localhost/test";
         }
 
         @Bean("maxConnections")
-        Integer maxConnections() {
+        public Integer maxConnections() {
             return 10;
         }
     }

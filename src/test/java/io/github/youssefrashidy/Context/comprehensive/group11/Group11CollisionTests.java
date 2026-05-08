@@ -19,16 +19,16 @@ class Group11CollisionTests {
     }
 
     @Component
-    static class Logger {
+    public static class Logger {
         String log() {
             return "component-logger";
         }
     }
 
-    @Configuration
+    public @Configuration
     static class LogConfig {
         @Bean("logger")
-        Logger logger() {
+        public Logger logger() {
             return new Logger() {
                 @Override
                 String log() {
