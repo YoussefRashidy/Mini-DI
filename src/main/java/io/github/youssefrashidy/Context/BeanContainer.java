@@ -3,6 +3,8 @@ package io.github.youssefrashidy.Context;
 import io.github.youssefrashidy.Exceptions.AmbiguousBeanException;
 import io.github.youssefrashidy.Exceptions.DuplicateBeanIdentifierException;
 import io.github.youssefrashidy.Exceptions.UnregisteredDependencyException;
+import io.github.youssefrashidy.annotations.Scope;
+import io.github.youssefrashidy.annotations.ScopeType;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -19,7 +21,7 @@ public class BeanContainer {
     private final Map<Class<?>, List<String>> typeIndex = new HashMap<>();
 
     public void registerBean(Class<?> cls, String identifier, Supplier<?> supplier) {
-        registerBean(new AnnotationBeanDefinition(cls, identifier), supplier);
+        registerBean(new ComponentBeanDefinition(cls, resolveScope(cls), identifier), supplier);
     }
 
     public void registerBean(BeanDefinition definition, Supplier<?> supplier) {
@@ -102,5 +104,18 @@ public class BeanContainer {
         if (!identifiers.contains(identifier)) {
             identifiers.add(identifier);
         }
+    }
+
+    private ScopeType resolveScope(Class<?> cls) {
+        if (cls.isAnnotationPresent(Scope.class)) {
+            return cls.getAnnotation(Scope.class).value();
+        }
+        for (var annotation : cls.getAnnotations()) {
+            var type = annotation.annotationType();
+            if (type.isAnnotationPresent(Scope.class)) {
+                return type.getAnnotation(Scope.class).value();
+            }
+        }
+        return ScopeType.SINGELTON;
     }
 }

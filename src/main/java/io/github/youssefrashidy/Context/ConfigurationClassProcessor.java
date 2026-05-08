@@ -40,9 +40,14 @@ public class ConfigurationClassProcessor {
         List<MethodBeanDefinition> definitions = proxies.keySet().stream()
                 .flatMap(cls -> Arrays.stream(cls.getMethods()))
                 .filter(method -> method.isAnnotationPresent(Bean.class))
-                .map(method -> new MethodBeanDefinition(method.getReturnType(),method,proxies.get(method.getDeclaringClass()),(method.isAnnotationPresent(Bean.class) &&
-                        !method.getAnnotation(Bean.class).value().isEmpty()) ?
-                        method.getAnnotation(Bean.class).value() : method.getName()))
+                .map(method -> new MethodBeanDefinition(
+                        method.getReturnType(),
+                        method,
+                        proxies.get(method.getDeclaringClass()),
+                        (method.isAnnotationPresent(Bean.class) && !method.getAnnotation(Bean.class).value().isEmpty())
+                                ? method.getAnnotation(Bean.class).value() : method.getName(),
+                        method.getAnnotation(Bean.class).scope()
+                ))
                 .collect(Collectors.toList());
         validateUniqueIdentifiers(definitions);
         return new ConfigurationContext(proxies, definitions);
