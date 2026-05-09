@@ -185,11 +185,7 @@ Java 24, Maven.
 ---
 
 ## Known rough edges
-
-- `ScopeType.SINGELTON` is a typo (should be `SINGLETON`) — a breaking rename, not yet done
-- Package naming uses `Context`, `Exceptions` (capital first letter) — Java convention says lowercase
 - `System.out.println` debug logs are still present in `DependencyGraphBuilder` — should use a proper logger or be removed
 - `AnnotationBeanDefinition` is an orphaned record (no longer used anywhere in the framework) — should be deleted
 - `DependencyGraphBuilder.buildMaps()` still has two near-identical loops for component beans and method beans
-- `cases/` and `legacy/` directories are scratchpad code living in `src/main` — should be moved or removed
 - The `registerBean(Class<?>, String, Supplier<?>)` overload on `BeanContainer` is never called from within the framework — dead API surface

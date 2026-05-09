@@ -20,6 +20,7 @@ public class BeanContainer {
     private final Map<String, BeanDefinition> definitions = new HashMap<>();
     private final Map<Class<?>, List<String>> typeIndex = new HashMap<>();
 
+    @Deprecated(forRemoval= true)
     public void registerBean(Class<?> cls, String identifier, Supplier<?> supplier) {
         registerBean(new ComponentBeanDefinition(cls, resolveScope(cls), identifier), supplier);
     }

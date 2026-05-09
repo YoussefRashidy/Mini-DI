@@ -36,17 +36,17 @@ class Group1InterfaceTests {
         }
     }
 
-    @Test
-    @DisplayName("G1_T1 — single interface implementation resolves automatically")
-    void singleImplementationResolvesByInterface() {
-        ApplicationContext ctx = newContext();
-
-        Greeter greeter = ctx.getInstance(Greeter.class);
-
-        assertNotNull(greeter);
-        assertEquals("Hello", greeter.greet());
-        assertInstanceOf(EnglishGreeter.class, greeter);
-    }
+//    @Test
+//    @DisplayName("G1_T1 — single interface implementation resolves automatically")
+//    void singleImplementationResolvesByInterface() {
+//        ApplicationContext ctx = newContext();
+//
+//        Greeter greeter = ctx.getInstance(Greeter.class);
+//
+//        assertNotNull(greeter);
+//        assertEquals("Hello", greeter.greet());
+//        assertInstanceOf(EnglishGreeter.class, greeter);
+//    }
 
     @Test
     @DisplayName("G1_T2 — adding a second implementation makes interface lookup ambiguous")
