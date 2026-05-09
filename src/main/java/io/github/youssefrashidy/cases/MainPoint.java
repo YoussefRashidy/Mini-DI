@@ -1,7 +1,7 @@
 package io.github.youssefrashidy.cases;
 
-import io.github.youssefrashidy.Context.AnnotationConfigApplicationContext;
-import io.github.youssefrashidy.Context.ApplicationContext;
+import io.github.youssefrashidy.context.AnnotationConfigApplicationContext;
+import io.github.youssefrashidy.context.ApplicationContext;
 
 public class MainPoint {
     public static void main(String[] args) {

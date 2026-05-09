@@ -5,9 +5,8 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
+@Scope(ScopeType.SINGLETON)
 @Retention(RetentionPolicy.RUNTIME)
-@Target(ElementType.METHOD)
-public @interface Bean {
-    String value() default "" ;
-    ScopeType scope() default ScopeType.SINGLETON;
+@Target(ElementType.TYPE)
+public @interface Singleton {
 }

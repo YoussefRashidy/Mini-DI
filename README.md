@@ -18,9 +18,13 @@ Supported features:
 - **`@Qualifier`** — disambiguate when multiple implementations exist for the same interface
 - **`@Configuration` + `@Bean` methods** — define beans programmatically, Spring-style
 - **Singleton scope** (default) and **Prototype scope** (`@Scope(ScopeType.PROTOTYPE)`)
+- **Composed scope annotations** — `@Prototype` and `@Singelton` as shorthand meta-annotations
+- **Scoped `@Bean` methods** — `@Bean(scope = ScopeType.PROTOTYPE)` supported directly on `@Bean`
 - **Prototype injection via `Supplier<T>`** — request a new instance every time
+- **Boxed wrapper injection** — `Integer`, `Long`, `String`, etc. can now be registered and injected as beans (via `@Bean` methods in `@Configuration`)
 - **Circular dependency detection** — caught at startup with a clear error
 - **Duplicate identifier detection** — two beans can't share the same name
+- **`getBeanIdentifiers()`** — inspect all registered bean names at runtime
 - **Rich error messages** — every exception tells you exactly which bean, which parameter, and why it failed
 
 ---
@@ -29,7 +33,7 @@ Supported features:
 
 ```
 src/main/java/io/github/youssefrashidy/
-├── annotations/         @Component, @Configuration, @Bean, @Inject, @Qualifier, @Scope, ScopeType
+├── annotations/         @Component, @Configuration, @Bean, @Inject, @Qualifier, @Scope, @Prototype, @Singelton, ScopeType
 ├── Context/             Core framework classes (scanner, graph, instantiator, container, resolver...)
 ├── Exceptions/          Typed exceptions for every failure mode
 ├── cases/               Manual usage examples / scratchpad
@@ -41,16 +45,18 @@ src/main/java/io/github/youssefrashidy/
 | Class | Role |
 |---|---|
 | `AnnotationConfigApplicationContext` | Entry point — orchestrates the full startup pipeline |
-| `ApplicationContext` | Interface exposing `getInstance(...)` |
+| `ApplicationContext` | Interface exposing `getInstance(...)` and `getBeanIdentifiers()` |
 | `ComponentScanner` | Classpath scan via ClassGraph → produces `ScanMap` |
 | `ConfigurationClassProcessor` | Proxies `@Configuration` classes via ByteBuddy, extracts `@Bean` method definitions |
 | `DependencyGraphBuilder` | Builds the adjacency graph + runs Kahn's topological sort |
 | `BeanInstantiator` | Walks init order, constructs beans, registers them in the container |
 | `BeanContainer` | The registry — stores beans by identifier and by type hierarchy |
-| `DependencyResolver` | Resolution logic: interface → impl, qualifier matching, identifier naming |
-| `ScanMap` | Record carrying the interface→impls map + component list + config classes |
-| `ConfigurationContext` | Record carrying ByteBuddy proxies + `MethodBeanDefinition` list |
-| `BeanDefinition` | Sealed interface with two permits: `AnnotationBeanDefinition` and `MethodBeanDefinition` |
+| `DependencyResolver` | Resolution logic: type → impl, qualifier matching, identifier naming |
+| `ScanMap` | Record: `resolveMap` + `components` (as `ComponentBeanDefinition`) + `configurationClasses` |
+| `ConfigurationContext` | Record: ByteBuddy proxies map + `MethodBeanDefinition` list |
+| `InstantiationContext` | Record: bundles `ScanMap`, `ConfigurationContext`, and `BeanContainer` for passing into `BeanInstantiator` internals |
+| `BeanDefinition` | Sealed interface with three permits: `ComponentBeanDefinition`, `MethodBeanDefinition`, `DependencyBeanDefinition` |
+| `ContextConfig` | Record wrapping the set of base packages to scan |
 
 ### Annotations
 
@@ -58,10 +64,12 @@ src/main/java/io/github/youssefrashidy/
 |---|---|---|
 | `@Component` | Type | Marks a class as a DI-managed bean |
 | `@Configuration` | Type | Marks a class as a config source (meta-annotated with `@Component`) |
-| `@Bean` | Method | Declares a bean inside a `@Configuration` class |
+| `@Bean` | Method | Declares a bean inside a `@Configuration` class; supports `value` (identifier) and `scope` |
 | `@Inject` | Constructor | Selects the injection constructor when multiple exist |
 | `@Qualifier` | Type / Parameter | Names a bean or disambiguates an injection site |
-| `@Scope` | Type | Sets scope (`SINGLETON` or `PROTOTYPE`) |
+| `@Scope` | Type | Sets scope (`SINGELTON` or `PROTOTYPE`) |
+| `@Prototype` | Type | Composed shorthand for `@Scope(ScopeType.PROTOTYPE)` |
+| `@Singelton` | Type | Composed shorthand for `@Scope(ScopeType.SINGELTON)` |
 
 ### Exceptions
 
@@ -69,9 +77,10 @@ Every failure mode has its own typed exception, all with detailed messages:
 
 - `AmbiguousBeanException` — multiple candidates, no qualifier
 - `AmbiguousConstructorException` — multiple `@Inject`-annotated constructors
+- `BeanInstantiationException` — constructor or `@Bean` method threw during instantiation
 - `CircularDependencyException` — cycle in the dependency graph
 - `DuplicateBeanIdentifierException` — two beans with the same identifier
-- `UnregisteredDependencyException` — requested bean doesn't exist
+- `UnregisteredDependencyException` — requested bean doesn't exist or Supplier wraps a non-prototype
 - `UnmetBeanDependencyException` — bean method got a `null` dependency
 - `BeanMethodDependencyException` — `@Bean` method dependency resolution failure
 
@@ -100,7 +109,7 @@ OrderService svc = ctx.getInstance(OrderService.class);
 ```java
 @Configuration
 public class AppConfig {
-    @Bean(value = "clock")
+    @Bean("clock")
     public Clock clock() {
         return Clock.systemUTC();
     }
@@ -130,7 +139,7 @@ public class PaymentProcessor {
 
 ```java
 @Component
-@Scope(ScopeType.PROTOTYPE)
+@Prototype   // or @Scope(ScopeType.PROTOTYPE)
 public class SessionFactory { ... }
 
 @Component
@@ -139,6 +148,26 @@ public class OrderService {
     public OrderService(Supplier<SessionFactory> sessionFactory) { ... }
     // sessionFactory.get() → new instance every time
 }
+```
+
+### Prototype `@Bean` method
+
+```java
+@Configuration
+public class AppConfig {
+    @Bean(scope = ScopeType.PROTOTYPE)
+    public RequestContext requestContext() {
+        return new RequestContext();
+    }
+}
+```
+
+### Scanning multiple packages
+
+```java
+ApplicationContext ctx = new AnnotationConfigApplicationContext(
+    Set.of("com.example.services", "com.example.config")
+);
 ```
 
 ---
@@ -155,16 +184,12 @@ Java 24, Maven.
 
 ---
 
-## What's coming (refactor phase)
+## Known rough edges
 
-The codebase works but has some rough edges worth cleaning up. Key areas planned for refactoring:
-
-- `DependencyResolver` has significant code duplication across its overloaded `resolveParamType` / `resolveParamIdentifier` methods — needs consolidation
-- `DependencyGraphBuilder.buildMaps()` processes `@Component` beans and `@Bean` method beans in two near-identical loops — should be unified
-- `BeanInstantiator` mixes scope resolution logic into instantiation — scope handling could be extracted
-- `@Bean.value()` has no default, forcing `@Bean(value = "")` — should default to `""`
-- `ScopeType.SINGELTON` is a typo (should be `SINGLETON`) — a breaking rename, but worth it
-- Package naming uses `Context` (capital C) — Java convention says lowercase
-- The `cases/` and `legacy/` directories are scratchpad code living in `main` — should be moved or removed
-- `System.out.println` debug logs are scattered throughout the graph builder — should be a proper logger or removed
-- `isResolvable()` in `DependencyGraphBuilder` has a redundant `isResolvable = false` assignment before being immediately overwritten
+- `ScopeType.SINGELTON` is a typo (should be `SINGLETON`) — a breaking rename, not yet done
+- Package naming uses `Context`, `Exceptions` (capital first letter) — Java convention says lowercase
+- `System.out.println` debug logs are still present in `DependencyGraphBuilder` — should use a proper logger or be removed
+- `AnnotationBeanDefinition` is an orphaned record (no longer used anywhere in the framework) — should be deleted
+- `DependencyGraphBuilder.buildMaps()` still has two near-identical loops for component beans and method beans
+- `cases/` and `legacy/` directories are scratchpad code living in `src/main` — should be moved or removed
+- The `registerBean(Class<?>, String, Supplier<?>)` overload on `BeanContainer` is never called from within the framework — dead API surface

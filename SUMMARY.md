@@ -1,6 +1,6 @@
-# Mini-DI — Project Summary (Refactoring Context)
+# Mini-DI — Project Summary (Current State)
 
-This document is a dense technical summary of the project's current state, intended as context for the upcoming refactoring phase. Not a user-facing doc.
+A dense technical summary of the project as it stands. Intended as a reference for ongoing work, not a user-facing doc.
 
 ---
 
@@ -13,35 +13,40 @@ A hand-rolled DI container inspired by Spring, built entirely on reflection + Cl
 ## Startup pipeline
 
 ```
-AnnotationConfigApplicationContext(entryPoint)
+AnnotationConfigApplicationContext(entryPoint | Set<String> packages)
     │
     ├─ ComponentScanner.scan(ContextConfig)
     │       → ClassGraph scan over base packages
-    │       → populates: componentList (List<Class<?>>)
-    │                    resolveMap (Map<interface, List<impl>>)
+    │       → populates: components (List<ComponentBeanDefinition>)
+    │                    resolveMap (Map<interface, List<ComponentBeanDefinition>>)
     │                    configurationClasses (List<Class<?>>)
     │       → returns ScanMap record
     │
-    ├─ ConfigurationClassProcessor.processConfigurationClasses(scanMap, beanContainer)
+    ├─ ConfigurationClassProcessor.processConfigurationClasses(configurationClasses, beanContainer)
     │       → ByteBuddy-proxies each @Configuration class
-    │       → intercepts @Bean methods: singleton calls → container lookup, prototype → super.call()
-    │       → builds List<MethodBeanDefinition> (cls=return type, method, proxy, identifier)
+    │       → intercepts @Bean methods:
+    │           SINGLETON calls  → container lookup, return cached; else super.call()
+    │           PROTOTYPE calls  → always super.call()
+    │       → builds List<MethodBeanDefinition> (cls=return type, method, proxy, identifier, scope)
     │       → validates no duplicate identifiers among @Bean methods
     │       → returns ConfigurationContext record (proxies map + bean definitions)
     │
     ├─ DependencyGraphBuilder.buildInitializationOrder(scanMap, configurationContext)
-    │       → for each component: resolve its @Inject constructor, build edges to its deps
-    │       → for each config bean: look at @Bean method params, build edges
+    │       → for each ComponentBeanDefinition: resolve @Inject constructor, build edges to deps
+    │       → for each MethodBeanDefinition: inspect @Bean method params, build edges
     │       → adjacency: Map<BeanDefinition, Set<BeanDefinition>>
     │       → runs Kahn's algorithm (topological sort)
     │       → throws CircularDependencyException if sort is incomplete
     │       → returns List<BeanDefinition> in init order
     │
     └─ BeanInstantiator.instantiateBeans(scanMap, configurationContext, initOrder, beanContainer)
-            → switches on BeanDefinition type (sealed: AnnotationBeanDefinition | MethodBeanDefinition)
-            → for AnnotationBeanDefinition: finds constructor (0-arg or @Inject), resolves params, calls newInstance
-            → for MethodBeanDefinition: resolves method params, calls method.invoke(proxy, args)
-            → scope logic: PROTOTYPE → registers Supplier<T>; SINGLETON → creates instance, wraps in () -> instance
+            → wraps scanMap + configurationContext + beanContainer into InstantiationContext
+            → switches on BeanDefinition type (sealed: ComponentBeanDefinition | MethodBeanDefinition)
+            → ComponentBeanDefinition: finds 0-arg or @Inject constructor, resolves params, calls newInstance
+            → MethodBeanDefinition: resolves method params, calls method.invoke(proxy, args)
+            → scope via instantiateWithScope:
+                PROTOTYPE → registers ThrowingFactory wrapped as Supplier<T> (new instance per get())
+                SINGLETON → creates instance once, registers () -> instance
             → writes into BeanContainer
 ```
 
@@ -50,110 +55,105 @@ AnnotationConfigApplicationContext(entryPoint)
 ## Key data structures
 
 **`ScanMap`** (record)
-- `resolveMap: Map<Class<?>, List<Class<?>>>` — interface → list of implementing `@Component` classes
-- `componentList: List<Class<?>>` — all scanned `@Component` classes
+- `resolveMap: Map<Class<?>, List<ComponentBeanDefinition>>` — interface → list of implementing `@Component` definitions
+- `components: List<ComponentBeanDefinition>` — all scanned `@Component` beans (excludes `@Configuration` classes)
 - `configurationClasses: List<Class<?>>` — all `@Configuration` classes
 
 **`ConfigurationContext`** (record)
 - `proxies: Map<Class<?>, Object>` — config class → ByteBuddy proxy instance
 - `beanDefinitions: List<MethodBeanDefinition>` — all `@Bean` method definitions
 
-**`BeanDefinition`** (sealed interface, permits `AnnotationBeanDefinition | MethodBeanDefinition`)
-- Both are records. Both implement `getName()`, `cls()`, `identifier()`.
-- `AnnotationBeanDefinition(cls, identifier)` — for `@Component` beans
-- `MethodBeanDefinition(cls, beanMethod, proxy, identifier)` — for `@Bean` method beans. `cls` is the method's declared return type (not necessarily the concrete type).
+**`InstantiationContext`** (record) — introduced in this version
+- Bundles `ScanMap`, `ConfigurationContext`, and `BeanContainer` into a single parameter object, passed through `BeanInstantiator`'s private methods to avoid long parameter lists.
+
+**`BeanDefinition`** (sealed interface, permits `ComponentBeanDefinition | MethodBeanDefinition | DependencyBeanDefinition`)
+- All three are records. All implement `getName()`, `cls()`, `identifier()`, `scope()`.
+- `ComponentBeanDefinition(cls, scope, identifier)` — for `@Component` beans
+- `MethodBeanDefinition(cls, beanMethod, proxy, identifier, scope)` — for `@Bean` method beans; `cls` is the method's declared return type; `scope` comes from `@Bean.scope()`
+- `DependencyBeanDefinition(cls, scope, identifier)` — ephemeral; produced by `DependencyResolver.resolveDependencyBeanDefinition()` during graph building and instantiation to represent a resolved dependency edge; never registered in `BeanContainer` directly
+
+> **Note:** `AnnotationBeanDefinition` is a leftover record that is no longer used anywhere in the framework. It should be deleted.
 
 **`BeanContainer`**
-- `beanRegistry: Map<String, Supplier<?>>` — identifier → supplier (prototype or singleton wrapped in lambda)
+- `beanRegistry: Map<String, Supplier<?>>` — identifier → supplier (prototype factory or singleton wrapped in lambda)
 - `definitions: Map<String, BeanDefinition>` — for duplicate detection and name lookup
-- `typeIndex: Map<Class<?>, List<String>>` — type (including superclasses and interfaces) → list of identifiers; populated via `registerTypeHierarchy`
+- `typeIndex: Map<Class<?>, List<String>>` — type (including superclasses and all interfaces) → list of identifiers; populated via recursive `registerTypeHierarchy`
 - `getInstance(Class<T>)` — throws if empty or ambiguous, delegates to `getInstance(identifier, cls)` if exactly one hit
+- `getBeanIdentifiers()` — returns unmodifiable view of all registered identifiers
 
 ---
 
 ## Bean identifier resolution
 
-Identifier for `@Component` beans: `@Qualifier.value()` if present on the class, else `cls.getSimpleName()`.
-Identifier for `@Bean` methods: `@Bean.value()` if non-empty, else `method.getName()`.
+**`@Component` beans:** `@Qualifier.value()` if present on the class, else `cls.getSimpleName()`.
 
-Injection site resolution is handled by `DependencyResolver`:
-- If the param type is concrete → use `resolveIdentifier(cls, configurationContext, param)`
-- If the param type is an interface → look in `resolveMap` (component impls) + `configurationContext.beanDefinitions()` (method bean return types), merge candidates, apply `@Qualifier` if present on the param
+**`@Bean` methods:** `@Bean.value()` if non-empty, else `method.getName()`. `@Bean.value()` now defaults to `""`, so bare `@Bean` works without `@Bean(value = "")`.
+
+**Injection site resolution** (`DependencyResolver`):
+1. `resolveParamType(param, scanMap, ctx)` — unwraps `Supplier<T>`, validates the inner type has at least one prototype candidate; returns the raw injection type
+2. `resolveParamIdentifier(param, paramType, scanMap, ctx)` — delegates to `resolveDependencyBeanDefinition`, returns the identifier
+3. `resolveDependencyBeanDefinition(paramType, scanMap, ctx, param)` — the single unified resolution path:
+    - collects all `ComponentBeanDefinition`s and `MethodBeanDefinition`s where `paramType.isAssignableFrom(def.cls())`
+    - applies `@Qualifier` filter if present on the param
+    - throws `AmbiguousBeanException` or `UnregisteredDependencyException` as appropriate
+    - returns a `DependencyBeanDefinition` wrapping the resolved identifier
+
+The old `resolveConcreteOrInterface` and the `ConfigurationContext`-taking overload of `resolveIdentifier` are still present but `@Deprecated` and unused — dead code to be removed.
 
 ---
 
 ## Scope handling
 
-**SINGLETON** (default): bean is instantiated once at startup, registered as `() -> instance`.
-**PROTOTYPE**: registered as a `Supplier<T>` that calls the constructor/method on every `get()`. Should be injected as `Supplier<T>` — injecting a prototype as a direct dependency is allowed but it will be converted into singelton inside singeltons and other prototypes.
+**SINGLETON** (default): instantiated once at startup, registered as `() -> instance`.
 
-ByteBuddy intercepts `@Bean` method calls on `@Configuration` proxies:
-- SINGLETON → checks container; if present, returns cached instance; else calls `super.call()`
-- PROTOTYPE → always calls `super.call()` (bypasses cache)
+**PROTOTYPE**: registered as a `Supplier<T>` that calls the constructor/method factory on every `get()`. Should be injected as `Supplier<T>`. Injecting a prototype bean as a direct (non-Supplier) dependency is allowed, but it becomes singleton from the dependent's perspective— `resolveParamType` validates that any `Supplier<T>` injection site's inner type resolves to at least one prototype.
+
+**`@Bean` scope**: set via `@Bean(scope = ScopeType.PROTOTYPE)`. `ConfigurationClassProcessor` reads `bean.scope()` directly; ByteBuddy interceptor checks `bean.scope() == ScopeType.PROTOTYPE` and always calls `super.call()` instead of doing a container lookup.
+
+**Composed scope annotations**: `@Prototype` and `@Singelton` are meta-annotated with `@Scope`. Both `ComponentScanner.resolveScope()` and `BeanContainer.resolveScope()` walk the annotation's meta-annotations to find `@Scope`, so these shorthand annotations work transparently.
 
 ---
 
-## Known issues / things to fix in the refactor
+## Boxed wrapper injection
+
+Primitive types (`byte`, `short`, `int`, `long`, `float`, `double`, `boolean`, `char`) are still in `UNRESOLVABLE` and rejected at graph build time. Boxed wrappers (`Integer`, `Long`, `String`, etc.) were removed from `UNRESOLVABLE` and can now be registered as `@Bean` method beans in `@Configuration` classes and injected normally.
+
+---
+
+## Known issues / things still to fix
 
 ### Code quality
 
-1. **`DependencyResolver` method explosion** — there are 4 overloads of `resolveParamType` and 2 of `resolveParamIdentifier`, with significant copy-paste between them. The `ConfigurationContext`-aware overloads essentially repeat all the qualifier logic. Should be consolidated.
+1. **`DependencyGraphBuilder.buildMaps()` duplication** — the loop over `scanMap.components()` and the loop over `configurationContext.beanDefinitions()` are still near-identical. The Supplier-unwrapping, `UNRESOLVABLE` check, `isResolvable` check, and candidate resolution steps repeat verbatim. Should be unified over a shared `Iterable<BeanDefinition>`.
 
-2. **`DependencyGraphBuilder.buildMaps()` duplication** — the loop over `scanMap.componentList()` and the loop over `configurationContext.beanDefinitions()` are near-identical (Supplier unwrapping, UNRESOLVABLE check, resolvability check, candidate resolution). Extract a shared method or unify into a single loop over all `BeanDefinition`s.
+2. **`@Deprecated` dead code in `DependencyResolver`** — `resolveConcreteOrInterface` and the old `resolveIdentifier(cls, ctx, param, scanMap)` overload are marked `@Deprecated` but still present. Should be removed.
 
-3. **`isResolvable()` redundancy** — `isResolvable = false` is assigned then immediately overwritten on the next line. Dead assignment.
+3. **`AnnotationBeanDefinition` orphan** — the record exists in `Context/` but is not referenced anywhere in the framework. Should be deleted.
 
-4. **`BeanInstantiator.resolveScope` / `resolveMethodScope` duplication** — both methods have identical Supplier-wrapping logic for PROTOTYPE scope. Could be extracted.
+4. **`System.out.println` debug logs in `DependencyGraphBuilder`** — scattered throughout `buildMaps()` and `topologicalSort()`. Should use SLF4J (transitively available via ClassGraph) or be removed.
 
-5. **Debug `System.out.println` everywhere in `DependencyGraphBuilder`** — either wire up SLF4J (already in the classpath via ClassGraph's transitive deps) or remove. Not appropriate for a library.
+5. **`BeanContainer.registerBean(Class<?>, String, Supplier<?>)` dead overload** — this overload is never called from within the framework. Should be removed to reduce API surface.
 
 ### Design
 
-6. **`@Bean.value()` has no default** — `@Bean(value = "")` is required even if you just want the method name. Spring uses `@Bean` with optional `value`. Fix: `String value() default ""`.
+1. **`@Configuration` meta-annotated with `@Component`** — `ComponentScanner.isComponent()` returns `true` for config classes, so they must be excluded by checking `isConfiguration()` first. Fragile ordering dependency; the separation should be cleaner.
 
-7. **`ScopeType.SINGELTON` typo** — misspelled. Should be `SINGLETON`. Breaking change but worth fixing before the API grows.
+2. **Package naming** — `Context`, `Exceptions` use uppercase first letter. Java convention is all-lowercase.
 
-8. **`@Configuration` is meta-annotated with `@Component`** — this causes `ComponentScanner.isComponent()` to return `true` for config classes. They're currently excluded by checking `isConfiguration()` first in the scan loop. This is fragile; the separation should be cleaner.
+3. **`cases/` and `legacy/` in `src/main`** — scratchpad and historical code living alongside the framework. Should be deleted or moved to a separate module / test scope.
 
-9. **Package naming** — `Context`, `Exceptions` use uppercase. Java convention is all-lowercase. Also `Exceptions` → `exceptions` (or even fold into a single `exception` package).
-
-10. **`cases/` and `legacy/` in `src/main`** — scratchpad and old code living alongside the framework. Should be deleted or moved to a separate module / test scope.
-
-11. **`MethodBeanDefinition.cls` vs actual runtime type** — the `cls` field is the method's declared return type. If the method returns an interface (e.g., `Clock`), the actual instance is a concrete implementation, but the definition's `cls` is `Clock.class`. This is why `isResolvable()` uses `type.isAssignableFrom(definition.cls())` rather than equality. Worth documenting or enforcing a convention.
-
-12. **`BeanContainer.registerBean(Class<?>, String, Supplier<?>)` overload** — this overload exists but is never called from within the framework (it was presumably from an older API). Consider removing to reduce surface area.
+4. **`MethodBeanDefinition.cls` vs actual runtime type** — `cls` is the method's declared return type. If the method returns an interface, `cls` is that interface, not the concrete type. `isResolvable()` and the resolution path use `type.isAssignableFrom(definition.cls())` to handle this. Worth an explicit note in Javadoc or a naming change (`declaredType`).
 
 ### Testing
 
-13. Test fixtures are in a `miniProject/` subdirectory with their own `fixtures/` package tree — reasonable, but the `simpleTests/` suite mixes fixture classes with test classes in the same package. Could be better organized.
+1. Comprehensive test suite now organized into 12 groups (`group1`–`group12`) under `Context/comprehensive/`. The `miniProject/` suite remains alongside the older `simpleTests/` suite.
 
-14. No test for the `@Configuration` + PROTOTYPE `@Bean` method combination where the method has parameters — likely a gap.
+2. No test for a `@Configuration` + `PROTOTYPE` `@Bean` method that also takes parameters — likely still a gap.
 
 ---
 
 ## Dependencies worth knowing
 
-- **ClassGraph** — does the classpath scan. Configured with `enableAllInfo()` which is heavy (loads all annotations, methods, etc.). Could be narrowed once the scan requirements are stable.
-- **ByteBuddy** — used only in `ConfigurationClassProcessor` to subclass `@Configuration` classes at runtime. The proxy intercepts `@Bean` method calls for singleton caching. If `@Configuration` support were dropped, ByteBuddy could be removed entirely.
+- **ClassGraph** — does the classpath scan. Configured with `enableAllInfo()`. Could be narrowed once scan requirements stabilize.
+- **ByteBuddy** — used only in `ConfigurationClassProcessor` to subclass `@Configuration` classes at runtime. If `@Configuration` support were dropped, ByteBuddy could be removed entirely.
 - **JUnit 5** — test scope only.
-
----
-
-## What the refactored architecture should look like
-
-Per the existing `refactor.txt` notes, the intended pipeline is:
-
-```
-Scan → Build dependency graph → Instantiate
-```
-
-With clear ownership:
-- `ComponentScanner` → produces `ScanMap`
-- `ConfigurationClassProcessor` → produces `ConfigurationContext`  
-- `DependencyGraphBuilder` → consumes both, produces `List<BeanDefinition>` (init order)
-- `BeanInstantiator` → consumes init order + scan results, writes into `BeanContainer`
-- `BeanContainer` → pure registry, no business logic
-- `DependencyResolver` → stateless utility, shared by graph builder and instantiator
-- `ApplicationContext` (interface) → implemented by `AnnotationConfigApplicationContext`
-
-This is essentially already the structure — the refactor is more about cleaning up the internals of each class than restructuring the pipeline itself.
