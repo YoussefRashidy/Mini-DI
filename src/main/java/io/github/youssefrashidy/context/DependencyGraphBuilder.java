@@ -104,12 +104,7 @@ public class DependencyGraphBuilder {
                 }
 
                 var candidateClass = dependencyResolver.resolveParamType(param, scanMap, configurationContext);
-                var candidateIdentifier = dependencyResolver.resolveParamIdentifier(param, candidateClass, scanMap, configurationContext);
-                BeanDefinition candidateDefinition = configurationContext.beanDefinitions().stream()
-                        .filter(definition -> definition.identifier().equals(candidateIdentifier))
-                        .map(definition -> (BeanDefinition) definition)
-                        .findFirst()
-                        .orElseGet(() -> dependencyResolver.resolveDependencyBeanDefinition(candidateClass, scanMap, configurationContext, param));
+                BeanDefinition candidateDefinition = dependencyResolver.resolveDependencyBeanDefinition(candidateClass, scanMap, configurationContext, param);
                 System.out.println("[DI] Resolved dependency " + type.getName() + " -> " + candidateClass.getName());
                 classGraph.computeIfAbsent(componentDefinition, _ -> new HashSet<>()).add(candidateDefinition);
             }
@@ -158,12 +153,7 @@ public class DependencyGraphBuilder {
                 }
 
                 var candidateClass = dependencyResolver.resolveParamType(param, scanMap, configurationContext);
-                var candidateIdentifier = dependencyResolver.resolveParamIdentifier(param, candidateClass, scanMap, configurationContext);
-                BeanDefinition candidateDefinition = configurationContext.beanDefinitions().stream()
-                        .filter(definition -> definition.identifier().equals(candidateIdentifier))
-                        .map(definition -> (BeanDefinition) definition)
-                        .findFirst()
-                        .orElseGet(() -> dependencyResolver.resolveDependencyBeanDefinition(candidateClass, scanMap, configurationContext, param));
+                BeanDefinition candidateDefinition = dependencyResolver.resolveDependencyBeanDefinition(candidateClass, scanMap, configurationContext, param);
                 System.out.println("[DI] Resolved dependency " + type.getName() + " -> " + candidateClass.getName());
                 classGraph.computeIfAbsent(beanDefinition, _ -> new HashSet<>()).add(candidateDefinition);
             }
