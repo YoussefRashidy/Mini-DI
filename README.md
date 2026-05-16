@@ -18,10 +18,11 @@ Supported features:
 - **`@Qualifier`** — disambiguate when multiple implementations exist for the same interface
 - **`@Configuration` + `@Bean` methods** — define beans programmatically, Spring-style
 - **Singleton scope** (default) and **Prototype scope** (`@Scope(ScopeType.PROTOTYPE)`)
-- **Composed scope annotations** — `@Prototype` and `@Singelton` as shorthand meta-annotations
+- **Composed scope annotations** — `@Prototype` and `@Singleton` as shorthand meta-annotations
 - **Scoped `@Bean` methods** — `@Bean(scope = ScopeType.PROTOTYPE)` supported directly on `@Bean`
 - **Prototype injection via `Supplier<T>`** — request a new instance every time
-- **Boxed wrapper injection** — `Integer`, `Long`, `String`, etc. can now be registered and injected as beans (via `@Bean` methods in `@Configuration`)
+- **Boxed wrapper injection** — `Integer`, `Long`, `String`, etc. can be registered as `@Bean` method beans and injected normally
+- **Structured logging** — SLF4J + Logback with file and console appenders; log level configurable via `logback.xml`
 - **Circular dependency detection** — caught at startup with a clear error
 - **Duplicate identifier detection** — two beans can't share the same name
 - **`getBeanIdentifiers()`** — inspect all registered bean names at runtime
@@ -33,14 +34,17 @@ Supported features:
 
 ```
 src/main/java/io/github/youssefrashidy/
-├── annotations/         @Component, @Configuration, @Bean, @Inject, @Qualifier, @Scope, @Prototype, @Singelton, ScopeType
-├── Context/             Core framework classes (scanner, graph, instantiator, container, resolver...)
-├── Exceptions/          Typed exceptions for every failure mode
+├── annotations/         @Component, @Configuration, @Bean, @Inject, @Qualifier, @Scope, @Prototype, @Singleton, ScopeType
+├── context/             Core framework classes (scanner, graph, instantiator, container, resolver...)
+├── exceptions/          Typed exceptions for every failure mode
 ├── cases/               Manual usage examples / scratchpad
 └── legacy/              Old monolithic implementations (kept for reference)
+
+src/main/resources/
+└── logback.xml          Logging configuration (file + console appenders)
 ```
 
-### Core pipeline (`Context/`)
+### Core pipeline (`context/`)
 
 | Class | Role |
 |---|---|
@@ -67,9 +71,9 @@ src/main/java/io/github/youssefrashidy/
 | `@Bean` | Method | Declares a bean inside a `@Configuration` class; supports `value` (identifier) and `scope` |
 | `@Inject` | Constructor | Selects the injection constructor when multiple exist |
 | `@Qualifier` | Type / Parameter | Names a bean or disambiguates an injection site |
-| `@Scope` | Type | Sets scope (`SINGELTON` or `PROTOTYPE`) |
+| `@Scope` | Type | Sets scope (`SINGLETON` or `PROTOTYPE`) |
 | `@Prototype` | Type | Composed shorthand for `@Scope(ScopeType.PROTOTYPE)` |
-| `@Singelton` | Type | Composed shorthand for `@Scope(ScopeType.SINGELTON)` |
+| `@Singleton` | Type | Composed shorthand for `@Scope(ScopeType.SINGLETON)` |
 
 ### Exceptions
 
@@ -178,14 +182,9 @@ ApplicationContext ctx = new AnnotationConfigApplicationContext(
 |---|---|---|
 | ClassGraph | 4.8.179 | Fast classpath scanning |
 | ByteBuddy | 1.14.14 | Runtime proxy generation for `@Configuration` classes |
+| SLF4J + Logback | — | Structured logging with file and console output |
 | JUnit 5 | 5.8.1 | Testing |
 
 Java 24, Maven.
 
 ---
-
-## Known rough edges
-- `System.out.println` debug logs are still present in `DependencyGraphBuilder` — should use a proper logger or be removed
-- `AnnotationBeanDefinition` is an orphaned record (no longer used anywhere in the framework) — should be deleted
-- `DependencyGraphBuilder.buildMaps()` still has two near-identical loops for component beans and method beans
-- The `registerBean(Class<?>, String, Supplier<?>)` overload on `BeanContainer` is never called from within the framework — dead API surface
