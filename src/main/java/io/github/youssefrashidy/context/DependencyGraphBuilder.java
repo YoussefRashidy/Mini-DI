@@ -1,9 +1,11 @@
 package io.github.youssefrashidy.context;
 
+import io.github.youssefrashidy.annotations.Inject;
 import io.github.youssefrashidy.exceptions.AmbiguousConstructorException;
 import io.github.youssefrashidy.exceptions.CircularDependencyException;
 import io.github.youssefrashidy.exceptions.UnregisteredDependencyException;
-import io.github.youssefrashidy.annotations.Inject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Parameter;
@@ -22,6 +24,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public class DependencyGraphBuilder {
+    private static final Logger logger = LoggerFactory.getLogger(DependencyGraphBuilder.class);
     private final DependencyResolver dependencyResolver;
 
     //    private static final Set<Class<?>> UNRESOLVABLE = Set.of(
@@ -42,21 +45,24 @@ public class DependencyGraphBuilder {
     }
 
     public List<BeanDefinition> buildInitializationOrder(ScanMap scanMap, ConfigurationContext configurationContext) {
-        System.out.println("[DI] Building initialization order");
+        logger.info("Building initialization order for {} component(s) and {} configuration bean(s)",
+                scanMap.components().size(), configurationContext.beanDefinitions().size());
         Map<BeanDefinition, Set<BeanDefinition>> classGraph = new HashMap<>();
         Map<BeanDefinition, Integer> indegreeMap = new HashMap<>();
         buildMaps(scanMap, configurationContext, classGraph, indegreeMap);
-        System.out.println("[DI] Graph nodes=" + classGraph.size());
+        logger.debug("Dependency graph contains {} node(s)", classGraph.size());
         return topologicalSort(classGraph, indegreeMap);
     }
 
     private void buildMaps(ScanMap scanMap, ConfigurationContext configurationContext, Map<BeanDefinition, Set<BeanDefinition>> classGraph, Map<BeanDefinition, Integer> indegreeMap) {
-        System.out.println("[DI] Scanning components=" + scanMap.components().size() + ", configBeans=" + configurationContext.beanDefinitions().size());
+        logger.debug("Scanning {} component(s) and {} configuration bean(s)",
+                scanMap.components().size(), configurationContext.beanDefinitions().size());
         for (var componentDefinition : scanMap.components()) {
             Class<?> cls = componentDefinition.cls();
-            System.out.println("[DI] Analyze component=" + cls.getName());
+            logger.trace("Analyzing component bean {} ({})", componentDefinition.identifier(), cls.getName());
             Constructor<?>[] constructors = cls.getDeclaredConstructors();
             if (constructors.length == 1 && constructors[0].getParameterCount() == 0) {
+                logger.debug("Component {} uses implicit no-arg constructor", cls.getName());
                 classGraph.put(componentDefinition, Collections.emptySet());
                 indegreeMap.put(componentDefinition, 0);
                 continue;
@@ -67,11 +73,13 @@ public class DependencyGraphBuilder {
                     .toArray(Constructor<?>[]::new);
 
             if (annotatedConstructors.length > 1) {
+                logger.warn("Multiple @Inject constructors found on {}", cls.getName());
                 throw new AmbiguousConstructorException("Class " + cls.getName() + " has " + annotatedConstructors.length + " constructors - exactly one is required. " +
                         "Annotate the intended constructor with @Inject.");
             }
 
             var constructor = annotatedConstructors[0];
+            logger.debug("Using constructor {} for component {}", constructor, cls.getName());
             Parameter[] params = constructor.getParameters();
 
             for (var param : params) {
@@ -87,6 +95,7 @@ public class DependencyGraphBuilder {
                 }
 
                 if (UNRESOLVABLE.contains(type)) {
+                    logger.warn("Unresolvable primitive/value parameter '{}' of type {} on component {}", param.getName(), type.getName(), componentDefinition.identifier());
                     throw new UnregisteredDependencyException(
                             "DI error: cannot inject parameter '" + param.getName() + "' of type '" + type.getName() +
                                     "' in bean '" + componentDefinition.identifier() + "' because primitive/value types are not supported. " +
@@ -95,8 +104,8 @@ public class DependencyGraphBuilder {
                 }
 
                 // add method to check for both components and beans methods
-                if (!isResolvable(scanMap, configurationContext, type)) {
-                    System.out.println("[DI] Missing dependency type=" + type.getName() + " for bean=" + componentDefinition.identifier());
+                if (isUnresolvable(scanMap, configurationContext, type)) {
+                    logger.warn("Missing dependency type {} for bean {}", type.getName(), componentDefinition.identifier());
                     throw new UnregisteredDependencyException(
                             "DI error: missing bean for parameter '" + param.getName() + "' of type '" + type.getName() +
                                     "' required by bean '" + componentDefinition.identifier() + "'."
@@ -105,15 +114,16 @@ public class DependencyGraphBuilder {
 
                 var candidateClass = dependencyResolver.resolveParamType(param, scanMap, configurationContext);
                 BeanDefinition candidateDefinition = dependencyResolver.resolveDependencyBeanDefinition(candidateClass, scanMap, configurationContext, param);
-                System.out.println("[DI] Resolved dependency " + type.getName() + " -> " + candidateClass.getName());
+                logger.debug("Resolved dependency {} -> {} for bean {}", type.getName(), candidateClass.getName(), componentDefinition.identifier());
                 classGraph.computeIfAbsent(componentDefinition, _ -> new HashSet<>()).add(candidateDefinition);
             }
             indegreeMap.put(componentDefinition, classGraph.get(componentDefinition).size());
         }
         for (var beanDefinition : configurationContext.beanDefinitions()) {
-            System.out.println("[DI] Analyze config bean=" + beanDefinition.identifier());
+            logger.trace("Analyzing config bean {} ({})", beanDefinition.identifier(), beanDefinition.beanMethod().getDeclaringClass().getName() + "#" + beanDefinition.beanMethod().getName());
             Parameter[] params = beanDefinition.beanMethod().getParameters();
             if (params.length == 0) {
+                logger.debug("Config bean {} has no dependencies", beanDefinition.identifier());
                 classGraph.put(beanDefinition, Collections.emptySet());
                 indegreeMap.put(beanDefinition, 0);
                 continue;
@@ -134,6 +144,7 @@ public class DependencyGraphBuilder {
                 }
 
                 if (UNRESOLVABLE.contains(type)) {
+                    logger.warn("Unresolvable primitive/value parameter '{}' of type {} on config bean {}", param.getName(), type.getName(), beanDefinition.identifier());
                     throw new UnregisteredDependencyException(
                             "DI error: cannot inject parameter '" + param.getName() + "' of type '" + type.getName() +
                                     "' into configuration bean method '" + beanDefinition.beanMethod().getDeclaringClass().getName() + "#" +
@@ -143,8 +154,8 @@ public class DependencyGraphBuilder {
                 }
 
                 // add method to check for both components and beans methods
-                if (!isResolvable(scanMap, configurationContext, type)) {
-                    System.out.println("[DI] Missing dependency type=" + type.getName() + " for config bean=" + beanDefinition.identifier());
+                if (isUnresolvable(scanMap, configurationContext, type)) {
+                    logger.warn("Missing dependency type {} for config bean {}", type.getName(), beanDefinition.identifier());
                     throw new UnregisteredDependencyException(
                             "DI error: missing bean for parameter '" + param.getName() + "' of type '" + type.getName() +
                                     "' required by configuration bean method '" + beanDefinition.beanMethod().getDeclaringClass().getName() + "#" +
@@ -154,16 +165,15 @@ public class DependencyGraphBuilder {
 
                 var candidateClass = dependencyResolver.resolveParamType(param, scanMap, configurationContext);
                 BeanDefinition candidateDefinition = dependencyResolver.resolveDependencyBeanDefinition(candidateClass, scanMap, configurationContext, param);
-                System.out.println("[DI] Resolved dependency " + type.getName() + " -> " + candidateClass.getName());
+                logger.debug("Resolved dependency {} -> {} for config bean {}", type.getName(), candidateClass.getName(), beanDefinition.identifier());
                 classGraph.computeIfAbsent(beanDefinition, _ -> new HashSet<>()).add(candidateDefinition);
             }
             indegreeMap.put(beanDefinition, classGraph.get(beanDefinition).size());
         }
     }
 
-    private static boolean isResolvable(ScanMap scanMap, ConfigurationContext configurationContext, Class<?> type) {
-        boolean isResolvable = false;
-        isResolvable = scanMap.components().stream().anyMatch(definition -> type.isAssignableFrom(definition.cls()))
+    private static boolean isUnresolvable(ScanMap scanMap, ConfigurationContext configurationContext, Class<?> type) {
+        boolean isResolvable = scanMap.components().stream().anyMatch(definition -> type.isAssignableFrom(definition.cls()))
                 || scanMap.resolveMap().containsKey(type);
         /*
          * Get the bean definition for the configuration classes
@@ -183,23 +193,24 @@ public class DependencyGraphBuilder {
                 .map(MethodBeanDefinition::cls)
                 .anyMatch(type::isAssignableFrom);
 
-        return isResolvable;
+        return !isResolvable;
     }
 
     private List<BeanDefinition> topologicalSort(Map<BeanDefinition, Set<BeanDefinition>> classGraph, Map<BeanDefinition, Integer> indegreeMap) {
-        System.out.println("[DI] Topological sort start");
-        System.out.println(classGraph);
+        logger.info("Starting topological sort");
+        logger.trace("Dependency graph: {}", classGraph);
         Deque<BeanDefinition> zeroDegreeBeans = indegreeMap.entrySet().stream()
                 .filter(entry -> entry.getValue() == 0)
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toCollection(ArrayDeque::new));
-        System.out.println(zeroDegreeBeans);
+        logger.debug("Initial zero-indegree beans: {}", zeroDegreeBeans);
 
         List<BeanDefinition> initializationOrder = new java.util.ArrayList<>();
 
         while (!zeroDegreeBeans.isEmpty()) {
             var beanDefinition = zeroDegreeBeans.poll();
             initializationOrder.add(beanDefinition);
+            logger.trace("Selected bean {} for initialization order", beanDefinition.identifier());
 
             Set<BeanDefinition> dependentBeans = classGraph.entrySet().stream()
                     .filter(entry -> entry.getValue().contains(beanDefinition))
@@ -220,14 +231,14 @@ public class DependencyGraphBuilder {
                     .map(entry -> entry.getKey().getName())
                     .sorted()
                     .collect(Collectors.joining(", "));
-            System.out.println("[DI] Circular dependency detected: " + unresolved);
+            logger.error("Circular dependency detected among beans: {}", unresolved);
             throw new CircularDependencyException(
                     "DI error: circular dependency detected among beans: [" + unresolved + "]. " +
                             "Review constructor dependencies to break the cycle."
             );
         }
 
-        System.out.println("[DI] Initialization order size=" + initializationOrder.size());
+        logger.info("Initialization order computed successfully with {} bean(s)", initializationOrder.size());
         return initializationOrder;
     }
 }
