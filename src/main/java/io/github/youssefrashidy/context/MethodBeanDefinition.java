@@ -4,19 +4,20 @@ import io.github.youssefrashidy.annotations.ScopeType;
 
 import java.lang.reflect.Method;
 
-public record MethodBeanDefinition(Class<?> cls , Method beanMethod, Object proxy , String identifier, ScopeType scope) implements BeanDefinition {
-	@Override
-	public String getName() {
-		return identifier;
-	}
+public record MethodBeanDefinition(Class<?> cls, Method beanMethod, Object proxy, String identifier,
+                                   ScopeType scope) implements BeanDefinition {
+    @Override
+    public String getName() {
+        return identifier;
+    }
 
-	@Override
-	public boolean equals(Object obj) {
-		return obj instanceof BeanDefinition other && identifier.equals(other.identifier());
-	}
+    @Override
+    public boolean equals(Object obj) {
+        return obj instanceof BeanDefinition other && identifier.equals(other.identifier()) && other.cls().equals(cls);
+    }
 
-	@Override
-	public int hashCode() {
-		return identifier.hashCode();
-	}
+    @Override
+    public int hashCode() {
+        return identifier.hashCode();
+    }
 }

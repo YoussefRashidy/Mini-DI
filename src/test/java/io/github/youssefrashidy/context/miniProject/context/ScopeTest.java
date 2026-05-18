@@ -21,8 +21,8 @@ public class ScopeTest {
     @BeforeAll
     static void boot() {
         ctx = new AnnotationConfigApplicationContext(Set.of(
-                "io.github.youssefrashidy.Context.miniProject.fixtures.core",
-                "io.github.youssefrashidy.Context.miniProject.fixtures.proto"
+                "io.github.youssefrashidy.context.miniProject.fixtures.core",
+                "io.github.youssefrashidy.context.miniProject.fixtures.proto"
         ));
     }
 

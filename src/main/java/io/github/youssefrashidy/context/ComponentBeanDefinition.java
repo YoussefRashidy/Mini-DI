@@ -2,7 +2,7 @@ package io.github.youssefrashidy.context;
 
 import io.github.youssefrashidy.annotations.ScopeType;
 
-public record ComponentBeanDefinition(Class<?> cls , ScopeType scope , String identifier) implements BeanDefinition {
+public record ComponentBeanDefinition(Class<?> cls, ScopeType scope, String identifier) implements BeanDefinition {
     @Override
     public String getName() {
         return identifier;
@@ -10,7 +10,7 @@ public record ComponentBeanDefinition(Class<?> cls , ScopeType scope , String id
 
     @Override
     public boolean equals(Object obj) {
-        return obj instanceof BeanDefinition other && identifier.equals(other.identifier());
+        return obj instanceof BeanDefinition other && identifier.equals(other.identifier()) && other.cls().equals(cls);
     }
 
     @Override

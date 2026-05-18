@@ -6,6 +6,7 @@ import io.github.classgraph.ScanResult;
 import io.github.youssefrashidy.annotations.Component;
 import io.github.youssefrashidy.annotations.Configuration;
 import io.github.youssefrashidy.annotations.ScopeType;
+import io.github.youssefrashidy.exceptions.DuplicateBeanIdentifierException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,12 +54,12 @@ public class ComponentScanner {
                                 .add(definition);
                     }
                 }
-
             }
         }
         if (components.isEmpty()) logger.warn("No components found in packages: {}", basePackages);
         return new ScanMap(resolveMap, components, configurationClasses);
     }
+
 
     private ScopeType resolveScope(Class<?> cls) {
         if (cls.isAnnotationPresent(io.github.youssefrashidy.annotations.Scope.class)) {

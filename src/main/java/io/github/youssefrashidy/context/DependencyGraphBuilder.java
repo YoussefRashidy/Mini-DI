@@ -3,6 +3,7 @@ package io.github.youssefrashidy.context;
 import io.github.youssefrashidy.annotations.Inject;
 import io.github.youssefrashidy.exceptions.AmbiguousConstructorException;
 import io.github.youssefrashidy.exceptions.CircularDependencyException;
+import io.github.youssefrashidy.exceptions.DuplicateBeanIdentifierException;
 import io.github.youssefrashidy.exceptions.UnregisteredDependencyException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -240,5 +241,18 @@ public class DependencyGraphBuilder {
 
         logger.info("Initialization order computed successfully with {} bean(s)", initializationOrder.size());
         return initializationOrder;
+    }
+
+    private void validateUniqueIdentifiers(List<BeanDefinition> definitions) {
+        Set<String> identifiers = new HashSet<>();
+        for (BeanDefinition definition : definitions) {
+            String identifier = definition.identifier();
+            if (!identifiers.add(identifier)) {
+                throw new DuplicateBeanIdentifierException(
+                        "DI error: duplicate bean identifier '" + identifier + "' in configuration classes. " +
+                                "Identifiers must be unique."
+                );
+            }
+        }
     }
 }

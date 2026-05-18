@@ -11,6 +11,7 @@ public class MainPoint {
         Node node3 = (Node)app.getInstance("node3") ;
         System.out.println("Success");
         System.out.println("%s %s".formatted(node1,node2));
+         
 
     }
 

@@ -11,6 +11,12 @@ public class config {
         return new Node() ;
     }
 
+    @Bean("Node")
+    public Node node3() {
+        return new Node() ;
+    }
+
+
     @Bean("node2")
     public Node node2() {
         return new Node() ;

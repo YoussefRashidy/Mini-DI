@@ -27,11 +27,11 @@ public class InterfaceResolutionTest {
     @BeforeAll
     static void boot() {
         coreCtx = new AnnotationConfigApplicationContext(Set.of(
-                "io.github.youssefrashidy.Context.miniProject.fixtures.core",
-                "io.github.youssefrashidy.Context.miniProject.fixtures.proto"
+                "io.github.youssefrashidy.context.miniProject.fixtures.core",
+                "io.github.youssefrashidy.context.miniProject.fixtures.proto"
         ));
         qualifierCtx = new AnnotationConfigApplicationContext(Set.of(
-                "io.github.youssefrashidy.Context.miniProject.fixtures.qualifier"
+                "io.github.youssefrashidy.context.miniProject.fixtures.qualifier"
         ));
     }
 
