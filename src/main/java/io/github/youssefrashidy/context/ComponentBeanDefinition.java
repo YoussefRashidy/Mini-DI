@@ -10,7 +10,11 @@ public record ComponentBeanDefinition(Class<?> cls, ScopeType scope, String iden
 
     @Override
     public boolean equals(Object obj) {
-        return obj instanceof BeanDefinition other && identifier.equals(other.identifier()) && other.cls().equals(cls);
+        return switch (obj) {
+            case ComponentBeanDefinition other     -> identifier.equals(other.identifier()) ;
+            case DependencyBeanDefinition other -> identifier.equals(other.identifier()) ;
+            case null, default                  -> false;
+        };
     }
 
     @Override
