@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class DependencyGraphBuilder {
     private static final Logger logger = LoggerFactory.getLogger(DependencyGraphBuilder.class);
@@ -46,6 +47,7 @@ public class DependencyGraphBuilder {
     }
 
     public List<BeanDefinition> buildInitializationOrder(ScanMap scanMap, ConfigurationContext configurationContext) {
+        validateUniqueIdentifiers(scanMap, configurationContext);
         logger.info("Building initialization order for {} component(s) and {} configuration bean(s)",
                 scanMap.components().size(), configurationContext.beanDefinitions().size());
         Map<BeanDefinition, Set<BeanDefinition>> classGraph = new HashMap<>();
@@ -243,16 +245,22 @@ public class DependencyGraphBuilder {
         return initializationOrder;
     }
 
-    private void validateUniqueIdentifiers(List<BeanDefinition> definitions) {
-        Set<String> identifiers = new HashSet<>();
-        for (BeanDefinition definition : definitions) {
-            String identifier = definition.identifier();
-            if (!identifiers.add(identifier)) {
+
+
+    private void validateUniqueIdentifiers(ScanMap scanMap, ConfigurationContext configurationContext) {
+        Map<String, BeanDefinition> seen = new HashMap<>();
+        Stream.<BeanDefinition>concat(
+                scanMap.components().stream(),
+                configurationContext.beanDefinitions().stream()
+        ).forEach(definition -> {
+            BeanDefinition previous = seen.putIfAbsent(definition.identifier(), definition);
+            if (previous != null) {
                 throw new DuplicateBeanIdentifierException(
-                        "DI error: duplicate bean identifier '" + identifier + "' in configuration classes. " +
-                                "Identifiers must be unique."
+                        "DI error: duplicate bean identifier '" + definition.identifier() + "' defined by both '"
+                                + previous.getName() + "' and '" + definition.getName() + "'. "
+                                + "Identifiers must be unique across components and configuration beans."
                 );
             }
-        }
+        });
     }
 }
